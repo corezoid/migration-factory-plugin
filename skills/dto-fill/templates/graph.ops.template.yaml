@@ -1,0 +1,42 @@
+layer: <layer-uuid, copied from graph.values.yaml>
+source_doc: <the user's sources>
+
+ops:
+  # `id:` on an `at:` op is not written by hand — applying adds it, and from
+  # then on the op is addressed by it and `at:` is ignored, so the file
+  # survives its renames. (The one id you do write yourself is at the bottom.)
+  - at: "<unique path suffix — quote it, a bare ' #' starts a comment>"
+    rename: <human-readable title; omit the key if the node is already named>
+    describe: |-
+      <the node's own description — not a form field>
+    set:
+      <field>: <value>
+      <date_field>: "2026-09-10"
+      <number_field>: 125000.00
+      source: bank_statement
+      evidence_quote: "<one span, the shortest that carries the values>"
+      confidence: 0.9
+      gaps: <what a reader would expect to find and will not; omit if nothing does>
+
+  # A record of the type: normal for the second and every further subject of a
+  # repeating type, once find_records has answered "not found" for it.
+  # `type:` is the slug in [brackets] in graph.values.yaml; `ref:` is a business
+  # key built from the subject itself, so the same document loaded twice finds
+  # this record instead of making a second. If find_records reported the
+  # subject FOUND, put ITS ref here — the one it printed, not a new one. The
+  # record is created off the canvas: nobody sees it on the graph until it is
+  # placed there by hand.
+  - type: <type slug>
+    ref: "<deterministic business key, e.g. contract-57-2026>"
+    rename: <human-readable title>
+    set:
+      <identity_field>: "<the value the ref was built from>"
+
+  # The one op that carries a hand-written `id:`: a record find_records
+  # reported as NO REF, because a person made it in Simulator by hand. It is
+  # read by the uuid and updated; a ref lookup would miss it and duplicate it.
+  - type: <type slug>
+    ref: "<a deterministic key all the same — the planner requires one>"
+    id: <uuid find_records printed>
+    set:
+      <identity_field>: "<the value that matched>"

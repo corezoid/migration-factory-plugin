@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "migration-factory-plugin": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/launch-mcp",
+      "args": [],
+      "env": {
+        "SIM_BASE_URL": "${SIM_BASE_URL:-https://mw.simulator.company/papi/1.0}",
+        "FIRECRAWL_BASE_URL": "${FIRECRAWL_BASE_URL:-https://dev-firecrawl.corezoid.com}"
+      }
+    }
+  }
+}

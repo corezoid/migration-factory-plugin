@@ -1,0 +1,54 @@
+#!/bin/sh
+# Launcher for the migration-factory-plugin MCP server: `go run`, so there is no build step
+# and no artifact to keep in sync — a fresh clone or a `/plugin install` works
+# with nothing but a Go toolchain. Compilation is cached, so this costs a
+# fraction of a second per session after the first.
+#
+# It exists as a script rather than a `go run` line in .mcp.json for two
+# reasons, both of them about the two things `go run` cannot do itself:
+#
+#   1. it needs the module's directory to be the current one, and `-C` is the
+#      only way to say so — which then leaves the *server* running there,
+#      nowhere near the user's project, so the real working directory is
+#      handed over in MIGRATION_FACTORY_PLUGIN_CWD and the server resolves relative paths
+#      against it;
+#   2. the client launches this from its own environment, not from a login
+#      shell, so PATH may be missing everything a terminal has.
+#
+# stdout is the MCP protocol: everything this script and the compiler say goes
+# to stderr.
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# find_go locates the toolchain: PATH first, then where installers put it.
+find_go() {
+	if command -v go >/dev/null 2>&1; then
+		command -v go
+		return 0
+	fi
+	for candidate in \
+		/usr/local/go/bin/go \
+		/opt/homebrew/bin/go \
+		/usr/local/bin/go \
+		/usr/lib/go/bin/go \
+		"${HOME:-}/go/bin/go" \
+		"${HOME:-}/.local/go/bin/go"; do
+		if [ -x "$candidate" ]; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	done
+	return 1
+}
+
+go_bin=$(find_go) || {
+	printf 'migration-factory-plugin: no Go toolchain found — install Go (https://go.dev/dl/)\n' >&2
+	printf 'migration-factory-plugin: looked on PATH and in the usual install locations\n' >&2
+	exit 1
+}
+
+MIGRATION_FACTORY_PLUGIN_CWD=$(pwd)
+export MIGRATION_FACTORY_PLUGIN_CWD
+
+exec "$go_bin" run -C "$here/server" . "$@"

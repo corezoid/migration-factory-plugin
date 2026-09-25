@@ -1,0 +1,53 @@
+{
+  "comment": "The regression suite. Every statement this skill has ever parsed correctly lives here, so that a change to the shared library is checkable rather than hopeful. `file` is resolved against --root (default: the current directory); a case whose file is absent is SKIPPED, never failed - the statements are not redistributed with the skill, and some of them are private.",
+  "cases": [
+    {
+      "name": "BT",
+      "file": "BT.pdf",
+      "spec": "parse_bt.py",
+      "shape": "two columns, date carry-forward, repeating page header whose phone number lands in the debit band, four trailer rows past the last transaction"
+    },
+    {
+      "name": "Exim",
+      "file": "Exim.pdf",
+      "spec": "parse_exim.py",
+      "shape": "three columns with a running balance to discard, dated continuation lines, negatives kept in their own column by the statement's own totals"
+    },
+    {
+      "name": "Unicredit",
+      "file": "Unicredit.pdf",
+      "spec": "parse_unicredit.py",
+      "shape": "one signed column, eu numbers, two date columns, amounts inside the description"
+    },
+    {
+      "name": "UABank card",
+      "file": "report_21-09-26_13-30-45.pdf",
+      "spec": "parse_uabank_card.py",
+      "shape": "five numeric columns, Cyrillic headers, space thousands separator splitting numbers in two, transaction times on the row's second line",
+      "private": true
+    },
+    {
+      "name": "demo sheet",
+      "file": "fixtures/sheet.csv",
+      "spec": "parse_demo_sheet.py",
+      "shape": "csv, bands are column indices, a wrapped narrative row"
+    },
+    {
+      "name": "demo Dr/Cr",
+      "file": "fixtures/drcr.csv",
+      "spec": "parse_demo_drcr.py",
+      "shape": "one unsigned column with the side in a marker column"
+    },
+    {
+      "name": "Unicredit (from scratch)",
+      "file": "Unicredit.pdf",
+      "script": "parse_scratch_unicredit.py",
+      "expect": {
+        "count": 37,
+        "debit": "20705.54",
+        "credit": "20706.54"
+      },
+      "shape": "the same statement parsed with no ColumnSpec at all -- proof the suite checks output, not implementation"
+    }
+  ]
+}

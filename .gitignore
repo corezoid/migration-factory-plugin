@@ -1,0 +1,28 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+coverage.out
+*.test
+
+# credentials the server's make targets read (SIM_BASE_URL / SIM_API_KEY)
+server/.env
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# agent worktrees the Claude Code harness creates while working here
+.claude/worktrees/

@@ -1,0 +1,26 @@
+layer: <layer-uuid, copied from graph.values.yaml>
+source_doc: <the site address, and the one or two pages actually read>
+
+# At most five ops, and the first one is the company. Every op addresses a node
+# already on the canvas with `at:` — the lite run does not create records, so
+# `type:`/`ref:` ops do not appear here. `id:` is not written by hand either:
+# applying stamps it on. At most one `picture:`, and only on the company node.
+ops:
+  - at: "COMPANY"
+    rename: <the twin's name as the site's footer or JSON-LD prints it; omit if the node already carries it>
+    picture: "<absolute address of the og:image or favicon the page read already listed; omit when there is none>"
+    set:
+      <field>: <value>
+      <date_field>: "2026-09-10"
+      <number_field>: 125000.00
+      source: website
+      evidence_quote: "<one span from the page, the shortest that carries the values>"
+      confidence: 0.9
+
+  - at: "<unique path suffix of the next empty node — quote it, a bare ' #' starts a comment>"
+    rename: <the real name, replacing a placeholder title>
+    set:
+      <field>: <value>
+      source: website
+      evidence_quote: "<one span from the page>"
+      confidence: 0.7

@@ -1,0 +1,22 @@
+layer: <layer-uuid, copied from graph.values.yaml>
+source_doc: <the file, and that only its first pages were read>
+
+# At most five ops, and the first one is the company. Every op addresses a node
+# already on the canvas with `at:` — the lite run does not create records, so
+# `type:`/`ref:` ops do not appear here. `id:` is not written by hand either:
+# applying stamps it on.
+ops:
+  - at: "COMPANY"
+    rename: <the twin's name as the source prints it; omit if the node already carries it>
+    set:
+      <field>: <value>
+      <date_field>: "2026-09-10"
+      <number_field>: 125000.00
+      source: <what the source is, e.g. invoice>
+      evidence_quote: "<one span, the shortest that carries the values>"
+      confidence: 0.8
+
+  - at: "<unique path suffix of the next empty node — quote it, a bare ' #' starts a comment>"
+    rename: <human-readable title>
+    set:
+      <field>: <value>

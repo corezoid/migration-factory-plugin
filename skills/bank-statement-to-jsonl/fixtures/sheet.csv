@@ -1,0 +1,6 @@
+Date,Ref,Narrative,Detail,Debit,Credit
+01/04/2026,R1,Card payment,Tesco Metro,29.00,
+,,continuation of the narrative,,,
+04/04/2026,R2,Salary,ACME Ltd,,2500.00
+07/04/2026,R3,Transfer out,To savings,150.50,
+Total,,,,179.50,2500.00

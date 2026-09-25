@@ -1,0 +1,57 @@
+layer: <layer-uuid, copied from graph.values.yaml>
+source_doc: <the site address, then the pages actually read>
+
+ops:
+  # A node on the canvas whose holes the site answered. `id:` is stamped by
+  # the apply and never written by hand.
+  - at: "<unique path suffix — quote it, a bare ' #' starts a comment>"
+    rename: <the real name, when the node still carries a placeholder title like "Service #1"; omit otherwise>
+    set:
+      <field>: <what the page states, verbatim unless the field's title demands a format>
+      <date_field>: "2026-09-10"
+      <number_field>: 1998
+      source: website
+      evidence_quote: "<one span from the page, the shortest that carries the values>"
+      confidence: 0.8
+      gaps: <what the site was asked for and does not publish; omit if nothing is>
+
+  # A picture of this subject: the address on the site, which the apply copies
+  # into storage. Only when the page ties that image to THIS node — alt text,
+  # caption, JSON-LD, og:image for the company — and say in the report what
+  # tied them. One image, one subject; a node that has a picture keeps it.
+  - at: "<unique path suffix>"
+    picture: "https://<the site>/team/ivanov.jpg"
+
+  # A subject of a repeating type whose nodes on the canvas are all taken —
+  # the second client, the fourth service. Only after find_records answered
+  # NOT FOUND for it; if it answered FOUND, put ITS ref here, the one it
+  # printed. `ref:` is built from the subject itself so the same site read
+  # twice finds this record instead of making another. The record is created
+  # off the canvas: nobody sees it on the graph until it is placed there.
+  - type: <type slug from [brackets] in graph.values.yaml>
+    ref: "<deterministic business key, e.g. party-acme-retail>"
+    rename: <the subject's name as the page spells it>
+    set:
+      <identity_field>: "<the value the ref was built from>"
+      source: website
+      evidence_quote: "<the span that names it>"
+      confidence: 0.7
+
+  # The same, for a record find_records reported as NO REF — made by hand in
+  # Simulator. It is read by the uuid; a ref lookup would miss it and create a
+  # duplicate. A ref is still required.
+  - type: <type slug>
+    ref: "<a deterministic key all the same>"
+    id: <uuid find_records printed>
+    set:
+      <identity_field>: "<the value that matched>"
+
+  # What does NOT belong in this file:
+  #   - a field that already holds a value — this run fills, it does not
+  #     overwrite, and a marketing page does not outrank the document the
+  #     stored value came from;
+  #   - a create find_records was not asked about, or one it answered UNKNOWN;
+  #   - a second record of the twin's own [company] type;
+  #   - a value with no evidence_quote behind it;
+  #   - a picture nothing on the page tied to the node — a hero banner, a
+  #     stock photograph, an image that merely sits on the subject's page.
