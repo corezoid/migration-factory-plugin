@@ -447,6 +447,13 @@ Two things differ from Claude Code, both of them the host's doing:
 - **credentials** — the environment does not reach the server at all. See
   below.
 
+One prerequisite is easy to miss on a server install: `launch-mcp` runs the
+server with `go run`, so the **Go toolchain has to exist wherever Hermes runs**.
+On a desktop that is the machine you already build on; in a container it is the
+image, which usually has no Go in it. Without one the skills still load and
+every tool call fails, so check it where Hermes itself runs, not where you
+cloned the repository.
+
 ## Credentials
 
 The server is configured purely from the environment. The `.mcp.json` shipped
@@ -514,7 +521,16 @@ with the package, and the v1 specification says in as many words that its `env`
 is visible package data and not a place for a credential.
 
 So the keys go where the host *does* point — `$PLUGIN_DATA/.env`, which under
-Hermes is one directory per package:
+Hermes is one directory per package inside the profile's own home:
+
+```
+<HERMES_HOME>/plugin-data/agent-plugin-migration-factory-plugin-7ec05b64/.env
+```
+
+`HERMES_HOME` is `~/.hermes` for the default profile, `~/.hermes/profiles/<name>`
+for a named one, and whatever the image mounts for a containerised install
+(`/opt/data/profiles/<name>` is a common one) — `hermes doctor` prints the
+resolved path. So, for the default profile:
 
 ```bash
 cat > ~/.hermes/plugin-data/agent-plugin-migration-factory-plugin-7ec05b64/.env <<'EOF'
