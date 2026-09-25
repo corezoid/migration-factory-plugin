@@ -1,5 +1,9 @@
-# Binaries
-bin/
+# Binaries. bin/ is build output, except the release binaries the plugin ships:
+# a host with no Go toolchain (a container) can start the server only from one
+# of those, so they are committed. `make -C server release` rebuilds them.
+bin/*
+!bin/migration-factory-plugin-mcp-linux-amd64
+!bin/migration-factory-plugin-mcp-linux-arm64
 *.exe
 *.exe~
 *.dll

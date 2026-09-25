@@ -154,12 +154,23 @@ As a Claude Code plugin there is nothing to do: `../.mcp.json` runs
 variables from your shell. Compilation is cached, so it costs a fraction of a
 second per session and the code that runs is always the code in the tree.
 
-The launcher is a script and not a `go run` line in the config because of two
-things `go run` cannot do on its own: it takes the module from the *current*
-directory (`-C` says otherwise, but then leaves the server itself sitting
-there, so the real working directory is handed over in `MIGRATION_FACTORY_PLUGIN_CWD` and
-relative paths in a tool call resolve against it), and it needs a toolchain on
-a `PATH` the client may not have.
+That is the second choice, though. The launcher first looks in `../bin` for a
+binary named after this platform the way Go names it —
+`migration-factory-plugin-mcp-$(uname -s)-$(uname -m)`, normalized — because a
+host with no toolchain has no other way to start the server; `make release`
+builds the committed pair, `linux/amd64` and `linux/arm64`. On Linux on one of
+those two architectures the binary therefore shadows the working tree: set
+`MIGRATION_FACTORY_PLUGIN_FROM_SOURCE=1` while developing, or
+`MIGRATION_FACTORY_PLUGIN_BIN=/path/to/binary` to pin a build of your own.
+A stale `bin/` is the failure mode to remember — rebuild it when the server
+changes.
+
+The launcher is a script and not a `go run` line in the config because of the
+things such a line cannot do on its own: choose between the binary and the
+source, and take the module from the *current* directory (`-C` says otherwise,
+but then leaves the server itself sitting there, so the real working directory
+is handed over in `MIGRATION_FACTORY_PLUGIN_CWD` and relative paths in a tool
+call resolve against it) with a toolchain on a `PATH` the client may not have.
 
 In any other MCP client, point it at the launcher the same way:
 
@@ -178,14 +189,18 @@ In any other MCP client, point it at the launcher the same way:
 }
 ```
 
-`make build` produces a standalone binary in `../bin` for a host with no Go
-toolchain; nothing else needs it.
+`make release` rebuilds the two binaries the plugin ships — `../bin/migration-factory-plugin-mcp-linux-amd64`
+and `-linux-arm64`, static and stripped — and they are committed, so run it and
+commit the result whenever this module changes. `make build` is the local
+variant: one binary for this machine, under the unsuffixed name the launcher
+falls back to.
 
 ## Development
 
 ```bash
 make check          # gofmt, go vet, go test — no network
 make mcp-handshake  # initialize + tools/list over stdio, no network
+make release        # the committed linux/amd64 + linux/arm64 binaries
 ```
 
 The live targets reach a real gateway and skip without `SIM_LIVE=1`. They read

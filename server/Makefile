@@ -16,14 +16,32 @@ endif
 
 .DEFAULT_GOAL := check
 
-# The plugin does not need this: ../launch-mcp runs the server with `go run`,
-# so there is no artifact to keep in sync. Build one only if you want to run
-# the server somewhere without a Go toolchain.
+# A binary for this machine, under the unsuffixed name ../launch-mcp falls back
+# to. A machine with a Go toolchain does not need it — the launcher builds from
+# source when there is no binary for its platform — so this is for running the
+# server somewhere by hand.
 .PHONY: build
 build: ## compile a standalone binary into ../bin (optional)
 	@mkdir -p $(BIN_DIR)
 	go build -trimpath -ldflags "-s -w" -o $(OUT) .
 	@echo "built $(OUT)"
+
+# The binaries that ship with the plugin. A host with no Go toolchain — a
+# container, typically, and the Hermes image is one — can start the server only
+# from these, so they are committed and ../launch-mcp picks the one matching
+# `uname`. Rebuild and commit them whenever the server changes.
+RELEASE_PLATFORMS := linux/amd64 linux/arm64
+
+.PHONY: release
+release: ## cross-compile the committed binaries into ../bin (one per shipped platform)
+	@mkdir -p $(BIN_DIR)
+	@for platform in $(RELEASE_PLATFORMS); do \
+		goos=$${platform%%/*}; goarch=$${platform##*/}; \
+		out=$(BIN_DIR)/$(BINARY)-$$goos-$$goarch; \
+		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch \
+			go build -trimpath -ldflags "-s -w" -o $$out . || exit 1; \
+		echo "built $$out"; \
+	done
 
 .PHONY: test
 test: ## unit tests, no network

@@ -391,8 +391,9 @@ needs a marketplace that lists it. Without one, point a project's `.mcp.json`
 at `launch-mcp` directly, as below.
 
 There is no build step: `.mcp.json` runs `launch-mcp`, which runs the server
-with `go run`. A Go toolchain is the only requirement, compilation is cached,
-and there is no artifact to forget after a clone or rebuild after a pull.
+with `go run` unless a binary for this platform is sitting in `bin/`. A Go
+toolchain is the only requirement, compilation is cached, and there is no
+artifact to forget after a clone or rebuild after a pull.
 
 Installing **copies** the plugin into `~/.claude/plugins/cache/`, so editing
 this directory changes nothing until you refresh that copy:
@@ -433,7 +434,9 @@ hermes plugins enable migration-factory-plugin
 A portable package is disabled on install; enabling one registers all six
 skills and the MCP server. The skills are namespaced — `skills_list` shows them
 under `agent-plugin-migration-factory-plugin-7ec05b64` — and the tools arrive
-as `mcp__migration-factory-plugin__export_graph` and the rest.
+as `mcp__migration_factory_plugin__export_graph` and the rest: Hermes spells a
+tool name with underscores, so the package's own hyphens do not survive into
+it.
 
 Two things differ from Claude Code, both of them the host's doing:
 
@@ -447,12 +450,22 @@ Two things differ from Claude Code, both of them the host's doing:
 - **credentials** — the environment does not reach the server at all. See
   below.
 
-One prerequisite is easy to miss on a server install: `launch-mcp` runs the
-server with `go run`, so the **Go toolchain has to exist wherever Hermes runs**.
-On a desktop that is the machine you already build on; in a container it is the
-image, which usually has no Go in it. Without one the skills still load and
-every tool call fails, so check it where Hermes itself runs, not where you
-cloned the repository.
+The thing a server install usually lacks is a Go toolchain: on a desktop that
+is the machine you already build on, but in a container it is the image, and
+the Hermes image has none. So the repository **ships the server already built**
+for the two platforms a container is on — `bin/migration-factory-plugin-mcp-linux-amd64`
+and `-linux-arm64` — and `launch-mcp` runs the one matching `uname` before it
+looks for a compiler. Nothing to install, and `hermes plugins install` carries
+the binaries because they are committed.
+
+Anywhere else — a different architecture, a platform with no shipped build —
+the launcher falls back to `go run` and Go has to exist wherever Hermes runs.
+Two ways out when it does not: build the binary yourself on a machine that has
+Go (`make -C server release`, then commit or copy `bin/` into the install), or
+point `MIGRATION_FACTORY_PLUGIN_BIN` at a binary you keep elsewhere. Without
+either, the skills still load and every tool call fails, so check it where
+Hermes itself runs rather than where you cloned the repository. The launcher
+says which of the two it wanted, on the MCP server's stderr.
 
 ## Credentials
 
@@ -553,6 +566,15 @@ It is a separate Go module under [`server/`](server/), sharing no code with
 this repository — see [server/README.md](server/README.md) for its layout, its
 `make check` / `make live-export` targets and the standalone MCP config. The
 whole repository can be copied out as a unit.
+
+`bin/` holds the two Linux builds the plugin ships, and they are the only
+build artifacts in the repository. `make -C server release` rebuilds both, and
+**a change to the server is not released until they are rebuilt and
+committed**: a host without Go runs the binary, not the source beside it. A
+host with Go builds from source and never reads them — unless it is Linux on
+one of those two architectures, where the binary wins; export
+`MIGRATION_FACTORY_PLUGIN_FROM_SOURCE=1` while working on the server there to
+put the working tree back in charge.
 
 
 ## Bank statements (bank-statement-to-jsonl)
