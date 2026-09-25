@@ -1,7 +1,9 @@
 # migration-factory-plugin
 
-A Claude Code plugin for filling a Digital Twin graph layer from documents and
-from the web, and for turning bank statements into JSONL.
+A plugin for filling a Digital Twin graph layer from documents and from the
+web, and for turning bank statements into JSONL. It installs into Claude Code
+and into Hermes Agent, from the one directory: the skills and the server are
+the same, only the manifest each host reads differs.
 
 Seven parts — two skills that work in opposite directions over the same export,
 a quick pass of each, one that does not touch the graph at all, one that drives
@@ -371,13 +373,20 @@ line, and what `top.py` refuses by name is an image and a legacy
 
 ## Install
 
+This repository **is** the plugin, for both hosts: `.claude-plugin/plugin.json`
+and `.mcp.json` for Claude Code, `plugin.json` and `mcp.json` for an Agent
+Plugins v1 host. Each reads its own pair and steps over the other's — Hermes
+skips `.claude-plugin/` by name, Claude Code never looks at the root
+`plugin.json`. One `skills/` directory and one `launch-mcp` serve both.
+
+### Claude Code
+
 ```
 /plugin marketplace add <marketplace-listing-this-repo>
 /plugin install migration-factory-plugin@<that-marketplace>
 ```
 
-This repository **is** the plugin — `.claude-plugin/plugin.json` sits at its
-root — but it carries no `marketplace.json` of its own, so `/plugin install`
+The repository carries no `marketplace.json` of its own, so `/plugin install`
 needs a marketplace that lists it. Without one, point a project's `.mcp.json`
 at `launch-mcp` directly, as below.
 
@@ -409,6 +418,34 @@ working tree, so a restart is enough to pick up an edit:
   }
 }
 ```
+
+### Hermes Agent
+
+The same directory is also a portable **Agent Plugins v1** package — `plugin.json`
+and `mcp.json` at the root, beside the `.claude-plugin/` manifest Claude Code
+reads and ignored by it — so Hermes installs it straight from the repository:
+
+```bash
+hermes plugins install corezoid/migration-factory-plugin --no-enable
+hermes plugins enable migration-factory-plugin
+```
+
+A portable package is disabled on install; enabling one registers all six
+skills and the MCP server. The skills are namespaced — `skills_list` shows them
+under `agent-plugin-migration-factory-plugin-7ec05b64` — and the tools arrive
+as `mcp__migration-factory-plugin__export_graph` and the rest.
+
+Two things differ from Claude Code, both of them the host's doing:
+
+- **the working directory.** Hermes starts a portable package's server inside
+  the package rather than inside the user's project, so a relative path in a
+  tool call would resolve against the plugin's own directory. `mcp.json` pins
+  the cwd to `${PLUGIN_DATA}` instead, which is at least writable and at least
+  the same place every time. Hand the tools absolute paths, or point
+  `MIGRATION_FACTORY_PLUGIN_CWD` at the project — `launch-mcp` keeps a value
+  that is already set rather than replacing it with its own;
+- **credentials** — the environment does not reach the server at all. See
+  below.
 
 ## Credentials
 
@@ -461,10 +498,38 @@ from the shell — and from the project environment, which is how mf-api hands
 over a session's key. Each entry that *is* listed carries a `:-` fallback,
 also on purpose. A `${VAR}` that is unset and has no default is passed through
 **literally**, and the server would be handed the string `${SIM_BASE_URL}` as
-its gateway — it refuses such a placeholder by name rather than dialling it.
+its gateway — it drops such a placeholder rather than dialling it, and falls
+back to the gateway the client would have used anyway.
 
 A missing variable surfaces when a tool is called, not at startup: the client
 launches the server long before anyone asks it for anything.
+
+### On a host that filters the environment (Hermes)
+
+Hermes does not hand its own environment to an MCP server: it builds one from a
+fixed safe list — `PATH`, `HOME`, `TMPDIR` and a few more — plus whatever the
+package's `mcp.json` spells out, and nothing else. An exported `SIM_API_KEY`
+therefore never arrives. Nor can it be written into `mcp.json`: that file ships
+with the package, and the v1 specification says in as many words that its `env`
+is visible package data and not a place for a credential.
+
+So the keys go where the host *does* point — `$PLUGIN_DATA/.env`, which under
+Hermes is one directory per package:
+
+```bash
+cat > ~/.hermes/plugin-data/agent-plugin-migration-factory-plugin-7ec05b64/.env <<'EOF'
+SIM_BASE_URL=mw.simulator.company
+SIM_API_KEY=...
+EOF
+```
+
+`MIGRATION_FACTORY_PLUGIN_ENV_FILE` names a file somewhere else, for an install
+that keeps its credentials elsewhere. Either way it is read once at startup and
+only ever **fills gaps**: a variable that already carries a value — mf-api's
+key, say — is never displaced by one on disk. The format is the small one
+everybody writes: `NAME=VALUE` a line, `#` comments, a tolerated `export`
+prefix, optional quotes, and no expansion of anything, because a `$` in a
+secret is part of the secret.
 
 ## The server
 

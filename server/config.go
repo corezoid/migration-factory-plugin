@@ -14,8 +14,11 @@ import (
 
 // The whole configuration of this server, and the whole of it comes from the
 // environment: an MCP client starts it with a working directory of its own
-// choosing, so there is no config file to look up and nothing to find
-// relative to the binary.
+// choosing, so there is nothing to find relative to the binary. A host that
+// filters the environment instead of passing it through leaves the credentials
+// in a .env file the host itself points at, which envfile.go folds into that
+// same environment before any of this is read — a way in, not a second place
+// to look.
 //
 // Two groups of variables and nothing else is configurable: the gateway, its
 // key and the key's fallback for the layer, and the same split of base url,
@@ -33,10 +36,13 @@ import (
 const (
 	// envBaseURL is the Simulator gateway. A bare host works —
 	// "mw.simulator.company" and "https://mw.simulator.company/papi/1.0" are
-	// the same target. .mcp.json spells it "${SIM_BASE_URL:-<dev gateway>}",
-	// so a caller that knows where the layer lives — mf-api, which sets it on
-	// the cc-api project from the session's workspace — wins, and an
-	// unconfigured install still reaches the dev gateway.
+	// the same target. A caller that knows where the layer lives — mf-api,
+	// which sets it on the cc-api project from the session's workspace — wins;
+	// unset is not an error but the client's own DefaultBaseURL, the same
+	// split the page reader has below. The default lives there rather than in
+	// a manifest because a portable Agent Plugins v1 mcp.json has no
+	// "${VAR:-fallback}" to write it with: its values are literal, and a
+	// literal would displace the caller that does know better.
 	envBaseURL = "SIM_BASE_URL"
 	// envAPIKey is the workspace API key issued at account.corezoid.com. It
 	// is scoped to one workspace on one gateway, so it and SIM_BASE_URL have
@@ -84,9 +90,13 @@ const (
 	// same split as the Simulator pair, and likewise left unset by .mcp.json.
 	envDefaultFirecrawlAPIKey = "DEFAULT_FIRECRAWL_API_KEY"
 
-	// envCWD is not configuration and nobody sets it by hand: it is how
-	// launch-mcp hands over the directory the MCP client started it in, which
-	// `go run -C` would otherwise replace with the module's own. See resolve.
+	// envCWD is not configuration in the ordinary sense: it is how launch-mcp
+	// hands over the directory the MCP client started it in, which `go run -C`
+	// would otherwise replace with the module's own. See resolve. It is worth
+	// setting by hand in one case — a host that starts this server inside the
+	// plugin's own directory rather than in the user's project, where relative
+	// paths would otherwise resolve against the package. launch-mcp keeps a
+	// value that is already set.
 	envCWD = "MIGRATION_FACTORY_PLUGIN_CWD"
 )
 
@@ -98,15 +108,15 @@ type config struct {
 	GroupID     int
 }
 
-// loadConfig reads the environment and fails on either variable being absent.
-// The message names the one that is missing, because that is the most likely
-// thing to be wrong with a fresh install.
+// loadConfig reads the environment. Only the key is required, and the message
+// names it, because that is the most likely thing to be wrong with a fresh
+// install; an absent gateway is the client's own default.
 func loadConfig() (*config, error) {
 	cfg := &config{
-		// Through firstConfigured too: the gateway is now "${SIM_BASE_URL:-…}"
-		// in .mcp.json, and a client that does not expand that syntax would
-		// hand the placeholder over as a host — better refused here, by name,
-		// than dialled.
+		// Through firstConfigured too: .mcp.json spells the gateway
+		// "${SIM_BASE_URL:-…}", and a client that does not expand that syntax
+		// would hand the placeholder over as a host — better dropped here for
+		// the client's default than dialled.
 		BaseURL:     firstConfigured(env(envBaseURL)),
 		APIKey:      firstConfigured(env(envAPIKey), env(envDefaultAPIKey)),
 		WorkspaceID: firstConfigured(env(envWorkspaceID)),
@@ -115,10 +125,6 @@ func loadConfig() (*config, error) {
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("no Simulator API key: set %s in the MCP server's env (or %s for a fallback)",
 			envAPIKey, envDefaultAPIKey)
-	}
-	if cfg.BaseURL == "" {
-		return nil, fmt.Errorf("no Simulator gateway: set %s in the MCP server's env "+
-			"(a bare host is enough, e.g. mw.simulator.company)", envBaseURL)
 	}
 	return cfg, nil
 }

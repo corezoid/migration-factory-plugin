@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "migration-factory-plugin",
+  "version": "0.7.0",
+  "description": "Read documents, statements, sites and exports; work out whose facts they are; and write them into a Digital Twin layer as a replayable ops file. Ships six skills — dto-fill (a source into the graph), dto-fill-via-web (the graph's empty fields out of a website), a lite quick pass of each (two pages in, five nodes out, company first, one round, no creates), bank-statement-to-jsonl (a bank statement into one JSON object per transaction, by column geometry rather than by reading it) and bank-statement-to-dto (the statement's header onto the layer and its rows onto the client's accounts, the two halves running in parallel) — and an MCP server with five tools: export_graph, apply_graph, find_records, read_page and post_statement.",
+  "author": {
+    "name": "mf-api"
+  },
+  "repository": "https://github.com/corezoid/migration-factory-plugin",
+  "keywords": [
+    "dto",
+    "digital-twin",
+    "simulator",
+    "graph",
+    "document-extraction",
+    "bank-statement",
+    "jsonl",
+    "transactions"
+  ]
+}

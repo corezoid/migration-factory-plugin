@@ -42,32 +42,51 @@ func TestLoadConfigReadsTheEnvironment(t *testing.T) {
 }
 
 func TestLoadConfigNamesTheMissingVariable(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(envBaseURL, "mw.simulator.company")
+	t.Setenv(envAPIKey, "")
+
+	_, err := loadConfig()
+	if err == nil {
+		t.Fatal("loadConfig succeeded without a credential")
+	}
+	// A fresh install fails here more often than anywhere else, so the
+	// message has to say which variable to set.
+	if !strings.Contains(err.Error(), envAPIKey) {
+		t.Errorf("error %q does not name %s", err, envAPIKey)
+	}
+}
+
+// An unset gateway is not a failure: it is the client's own DefaultBaseURL,
+// the same split loadFirecrawlConfig has. A portable Agent Plugins v1 mcp.json
+// cannot write "${SIM_BASE_URL:-…}" — its env values are literal — so a host
+// that starts this server from one supplies no gateway at all, and an install
+// that supplies none has to reach the cloud rather than refuse to start.
+func TestLoadConfigLeavesAnAbsentGatewayToTheClient(t *testing.T) {
 	tests := []struct {
 		name    string
 		baseURL string
-		apiKey  string
-		want    string
 	}{
-		{"no key", "mw.simulator.company", "", envAPIKey},
-		{"no gateway", "", "key-1", envBaseURL},
+		{"unset", ""},
 		// A client that does not expand "${SIM_BASE_URL:-…}" hands the text
 		// over as the gateway; it is a missing value, not a host to dial.
-		{"gateway placeholder", "${SIM_BASE_URL:-https://mw.simulator.company/papi/1.0}", "key-1", envBaseURL},
+		{"placeholder", "${SIM_BASE_URL:-https://mw.simulator.company/papi/1.0}"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			clearEnv(t)
 			t.Setenv(envBaseURL, tc.baseURL)
-			t.Setenv(envAPIKey, tc.apiKey)
+			t.Setenv(envAPIKey, "key-1")
 
-			_, err := loadConfig()
-			if err == nil {
-				t.Fatal("loadConfig succeeded without a credential")
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig: %v", err)
 			}
-			// A fresh install fails here more often than anywhere else, so
-			// the message has to say which variable to set.
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error %q does not name %s", err, tc.want)
+			if cfg.BaseURL != "" {
+				t.Errorf("BaseURL = %q, want it left to the client's default", cfg.BaseURL)
+			}
+			if got := simulator.NormalizeBaseURL(cfg.BaseURL); got != "" {
+				t.Errorf("normalised BaseURL = %q, want the client to fill it in", got)
 			}
 		})
 	}

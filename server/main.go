@@ -36,6 +36,11 @@ func main() {
 	log.SetPrefix(serverName + ": ")
 	log.SetOutput(os.Stderr)
 
+	// Before anything reads the environment: a host that filters it — a
+	// portable Agent Plugins v1 one, where a key cannot travel in a variable —
+	// leaves the credentials in a file instead. See envfile.go.
+	loadEnvFile()
+
 	// serve only ever returns the decoder's error; a closed stdin is the
 	// normal end, everything else is a real stop.
 	if err := serve(os.Stdin, os.Stdout); !errors.Is(err, io.EOF) {

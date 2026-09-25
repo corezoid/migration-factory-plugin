@@ -48,7 +48,12 @@ go_bin=$(find_go) || {
 	exit 1
 }
 
-MIGRATION_FACTORY_PLUGIN_CWD=$(pwd)
+# The directory the client started us in, so a relative path in a tool call
+# resolves against the user's project rather than against this module. A host
+# that starts the server inside the plugin's own directory instead — a portable
+# Agent Plugins v1 one pins the cwd to the package — can point this somewhere
+# useful by setting the variable itself, so an existing value is kept.
+: "${MIGRATION_FACTORY_PLUGIN_CWD:=$(pwd)}"
 export MIGRATION_FACTORY_PLUGIN_CWD
 
 exec "$go_bin" run -C "$here/server" . "$@"

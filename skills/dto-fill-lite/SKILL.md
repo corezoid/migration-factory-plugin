@@ -1,6 +1,6 @@
 ---
 name: dto-fill-lite
-description: The quick pass of dto-fill. Reads only the head of one document — at most two pages — and writes at most five nodes of an empty Digital Twin layer, the company node first and always. No record lookups, no creates, no second round: one export, one read, one ops file, one apply. Use when the user wants a fast or cheap first fill of a layer, a company card out of a document, or says lite, quick, draft, preview, "хотя бы компанию", "по-быстрому", "черновой прогон". Triggers on "быстро заполни граф из файла", "лайт прогон dto-fill", "вытащи компанию из документа", "черновик DTO по документу", "quick fill the twin from this file", "lite dto-fill", "just get the company from this document", "/dto-fill-lite".
+description: The quick pass of dto-fill. Reads only the head of one document — at most two pages — and writes at most five nodes of an empty Digital Twin layer, the company node first and always. No record lookups, no creates, no second round — one export, one read, one ops file, one apply. Use when the user wants a fast or cheap first fill of a layer, a company card out of a document, or says lite, quick, draft, preview, "хотя бы компанию", "по-быстрому", "черновой прогон". Triggers on "быстро заполни граф из файла", "лайт прогон dto-fill", "вытащи компанию из документа", "черновик DTO по документу", "quick fill the twin from this file", "lite dto-fill", "just get the company from this document", "/dto-fill-lite".
 ---
 
 # dto-fill-lite — the head of a document, the top of an empty layer
