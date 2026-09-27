@@ -242,7 +242,7 @@ func TestLiveUploadPicture(t *testing.T) {
 	if os.Getenv("SIM_UPLOAD") == "" {
 		t.Skip("this one writes a file to a real workspace: set SIM_UPLOAD=1 to allow it")
 	}
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(nil)
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}

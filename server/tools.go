@@ -40,6 +40,7 @@ func toolDefs() []any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"sim": simSchema(),
 					"layer": map[string]any{
 						"type":        "string",
 						"description": "Layer UUID to export.",
@@ -86,6 +87,7 @@ func toolDefs() []any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"sim": simSchema(),
 					"ops": map[string]any{
 						"type":        "string",
 						"description": "Path to the ops file to plan or apply.",
@@ -138,6 +140,7 @@ func toolDefs() []any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"sim": simSchema(),
 					"type": map[string]any{
 						"type":        "string",
 						"description": "Type slug to look in — the name in [square brackets] in graph.values.yaml.",
@@ -238,6 +241,7 @@ func toolDefs() []any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"sim": simSchema(),
 					"account_id": map[string]any{
 						"type": "string",
 						"description": "The account-name category to record under, BY NAME — e.g. " +
@@ -329,8 +333,9 @@ func toolResult(text string, isError bool) any {
 
 func runExport(raw json.RawMessage) (string, error) {
 	var args struct {
-		Layer string `json:"layer"`
-		Dir   string `json:"dir"`
+		Layer string       `json:"layer"`
+		Dir   string       `json:"dir"`
+		Sim   *simOverride `json:"sim"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
@@ -343,7 +348,7 @@ func runExport(raw json.RawMessage) (string, error) {
 		return "", errors.New("no layer to export: pass `layer` with the layer UUID")
 	}
 
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(args.Sim)
 	if err != nil {
 		return "", err
 	}
@@ -379,10 +384,11 @@ func runExport(raw json.RawMessage) (string, error) {
 // carries that identity.
 func runFindRecords(raw json.RawMessage) (string, error) {
 	var args struct {
-		Type   string   `json:"type"`
-		Values []string `json:"values"`
-		Fields []string `json:"fields"`
-		Dir    string   `json:"dir"`
+		Type   string       `json:"type"`
+		Values []string     `json:"values"`
+		Fields []string     `json:"fields"`
+		Dir    string       `json:"dir"`
+		Sim    *simOverride `json:"sim"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
@@ -393,7 +399,7 @@ func runFindRecords(raw json.RawMessage) (string, error) {
 		return "", errors.New("no type to check: pass `type` with a slug from graph.values.yaml")
 	}
 
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(args.Sim)
 	if err != nil {
 		return "", err
 	}
@@ -625,11 +631,12 @@ func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func runApply(raw json.RawMessage) (string, error) {
 	var args struct {
-		Ops        string `json:"ops"`
-		Write      bool   `json:"write"`
-		Layer      string `json:"layer"`
-		Partial    bool   `json:"partial"`
-		KeepExport bool   `json:"keep_export"`
+		Ops        string       `json:"ops"`
+		Write      bool         `json:"write"`
+		Layer      string       `json:"layer"`
+		Partial    bool         `json:"partial"`
+		KeepExport bool         `json:"keep_export"`
+		Sim        *simOverride `json:"sim"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", fmt.Errorf("bad arguments: %w", err)
@@ -645,7 +652,7 @@ func runApply(raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf("ops file %s: %w", opsPath, err)
 	}
 
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(args.Sim)
 	if err != nil {
 		return "", err
 	}
@@ -749,12 +756,13 @@ func writeWarnings(b *strings.Builder, warnings []string) {
 
 // postStatementArgs is one post_statement call.
 type postStatementArgs struct {
-	AccountID string `json:"account_id"`
-	ActorID   string `json:"actor_id"`
-	Path      string `json:"path"`
-	RefPrefix string `json:"ref_prefix"`
-	Timezone  string `json:"timezone"`
-	DryRun    bool   `json:"dry_run"`
+	AccountID string       `json:"account_id"`
+	ActorID   string       `json:"actor_id"`
+	Path      string       `json:"path"`
+	RefPrefix string       `json:"ref_prefix"`
+	Timezone  string       `json:"timezone"`
+	DryRun    bool         `json:"dry_run"`
+	Sim       *simOverride `json:"sim"`
 }
 
 // runPostStatement records a parsed statement on an actor.
@@ -778,12 +786,12 @@ func runPostStatement(raw json.RawMessage) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(args.Sim)
 	if err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(cfg.WorkspaceID) == "" {
-		return "", errors.New("no workspace: an account pair is workspace-level, so set SIM_WORKSPACE_ID in the MCP server's env")
+		return "", errors.New("no workspace: an account pair is workspace-level, so pass `sim.workspace_id` with the call or set SIM_WORKSPACE_ID in the MCP server's env")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), postStatementTimeout)

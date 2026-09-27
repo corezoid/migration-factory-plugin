@@ -111,7 +111,40 @@ type config struct {
 // loadConfig reads the environment. Only the key is required, and the message
 // names it, because that is the most likely thing to be wrong with a fresh
 // install; an absent gateway is the client's own default.
-func loadConfig() (*config, error) {
+// simOverride is the workspace one call speaks to, handed over by whoever owns
+// the run instead of read from the server's environment.
+//
+// It exists because a host can start this server once and share it between
+// runs: Hermes keeps one process per profile, so a workspace key taken from
+// the environment is the *server's* key, not the run's, and a service that
+// builds for many sessions has no way to say whose layer this call is for.
+// Claude Code needs none of it — it starts a project's server with that
+// project's environment — so every field is optional and an absent one leaves
+// the environment exactly as it was.
+type simOverride struct {
+	BaseURL     string `json:"base_url"`
+	APIKey      string `json:"api_key"`
+	WorkspaceID string `json:"workspace_id"`
+	GroupID     int    `json:"group_id"`
+}
+
+// simSchema is the argument as the tools advertise it.
+func simSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"description": "The Simulator workspace THIS run writes to, when the caller named one. " +
+			"Pass it unchanged on every call to this plugin's tools — it is what decides whose layer is written, " +
+			"and leaving it out on one call sends that call to the server's own workspace instead.",
+		"properties": map[string]any{
+			"base_url":     map[string]any{"type": "string", "description": "Gateway of that workspace."},
+			"api_key":      map[string]any{"type": "string", "description": "Workspace API key the layer is written with."},
+			"workspace_id": map[string]any{"type": "string", "description": "Workspace the key belongs to."},
+			"group_id":     map[string]any{"type": "integer", "description": "Group every created record is shared to."},
+		},
+	}
+}
+
+func loadConfig(over *simOverride) (*config, error) {
 	cfg := &config{
 		// Through firstConfigured too: .mcp.json spells the gateway
 		// "${SIM_BASE_URL:-…}", and a client that does not expand that syntax
@@ -122,8 +155,20 @@ func loadConfig() (*config, error) {
 		WorkspaceID: firstConfigured(env(envWorkspaceID)),
 		GroupID:     groupID(),
 	}
+	// The call wins over the environment, field by field: a caller that names
+	// only the key still gets the server's gateway, which is what a single
+	// deployment wants, and one that names all four is speaking for a session
+	// the server knows nothing about.
+	if over != nil {
+		cfg.BaseURL = firstConfigured(strings.TrimSpace(over.BaseURL), cfg.BaseURL)
+		cfg.APIKey = firstConfigured(strings.TrimSpace(over.APIKey), cfg.APIKey)
+		cfg.WorkspaceID = firstConfigured(strings.TrimSpace(over.WorkspaceID), cfg.WorkspaceID)
+		if over.GroupID > 0 {
+			cfg.GroupID = over.GroupID
+		}
+	}
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("no Simulator API key: set %s in the MCP server's env (or %s for a fallback)",
+		return nil, fmt.Errorf("no Simulator API key: pass `sim.api_key` with the call, or set %s in the MCP server's env (or %s for a fallback)",
 			envAPIKey, envDefaultAPIKey)
 	}
 	return cfg, nil

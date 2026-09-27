@@ -115,7 +115,7 @@ func TestLoadEnvFileCarriesTheKeyIntoTheConfig(t *testing.T) {
 
 	loadEnvFile()
 
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(nil)
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}

@@ -21,7 +21,7 @@ func TestLoadConfigReadsTheEnvironment(t *testing.T) {
 	t.Setenv(envBaseURL, "  mw.simulator.company  ")
 	t.Setenv(envAPIKey, "key-1")
 
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(nil)
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestLoadConfigNamesTheMissingVariable(t *testing.T) {
 	t.Setenv(envBaseURL, "mw.simulator.company")
 	t.Setenv(envAPIKey, "")
 
-	_, err := loadConfig()
+	_, err := loadConfig(nil)
 	if err == nil {
 		t.Fatal("loadConfig succeeded without a credential")
 	}
@@ -78,7 +78,7 @@ func TestLoadConfigLeavesAnAbsentGatewayToTheClient(t *testing.T) {
 			t.Setenv(envBaseURL, tc.baseURL)
 			t.Setenv(envAPIKey, "key-1")
 
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(nil)
 			if err != nil {
 				t.Fatalf("loadConfig: %v", err)
 			}
@@ -115,7 +115,7 @@ func TestLoadConfigFallsBackToTheDefaultKey(t *testing.T) {
 			t.Setenv(envAPIKey, tc.apiKey)
 			t.Setenv(envDefaultAPIKey, tc.defaultKey)
 
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(nil)
 			if err != nil {
 				t.Fatalf("loadConfig: %v", err)
 			}
@@ -149,7 +149,7 @@ func TestLoadConfigReadsTheGroup(t *testing.T) {
 			t.Setenv(envAPIKey, "key-1")
 			t.Setenv(envGroupID, tc.value)
 
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(nil)
 			if err != nil {
 				t.Fatalf("loadConfig: %v", err)
 			}
@@ -201,5 +201,94 @@ func TestLoadFirecrawlConfigNamesTheMissingKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), envFirecrawlAPIKey) {
 		t.Errorf("error %q does not name %s", err, envFirecrawlAPIKey)
+	}
+}
+
+// A host that starts this server once and shares it between runs — Hermes
+// keeps one process per profile — has no other way to say whose layer a call
+// writes. Every field the call names wins over the environment; the ones it
+// leaves out keep the server's own, so an install that names only a key still
+// talks to the gateway it was configured with.
+func TestACallCanNameTheWorkspaceItWritesTo(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(envBaseURL, "mw.simulator.company")
+	t.Setenv(envAPIKey, "server-key")
+	t.Setenv(envWorkspaceID, "server-ws")
+	t.Setenv(envGroupID, "111")
+
+	cfg, err := loadConfig(&simOverride{
+		BaseURL: "sim.simulator.company", APIKey: "session-key", WorkspaceID: "session-ws", GroupID: 222,
+	})
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.APIKey != "session-key" || cfg.BaseURL != "sim.simulator.company" ||
+		cfg.WorkspaceID != "session-ws" || cfg.GroupID != 222 {
+		t.Fatalf("cfg = %+v, want every field from the call", cfg)
+	}
+
+	// Named in part: the gateway and the group stay the server's.
+	partial, err := loadConfig(&simOverride{APIKey: "session-key"})
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if partial.APIKey != "session-key" || partial.BaseURL != "mw.simulator.company" ||
+		partial.WorkspaceID != "server-ws" || partial.GroupID != 111 {
+		t.Fatalf("cfg = %+v, want only the key replaced", partial)
+	}
+}
+
+// The property the whole scheme rests on: ten sessions building at once share
+// this process, so what one call names must not reach the next. Nothing is
+// stored — each call is read afresh — and this is what says so.
+func TestWhatOneCallNamesDoesNotReachTheNext(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(envBaseURL, "mw.simulator.company")
+	t.Setenv(envAPIKey, "server-key")
+
+	for _, key := range []string{"session-a", "session-b", "session-c"} {
+		cfg, err := loadConfig(&simOverride{APIKey: key})
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+		if cfg.APIKey != key {
+			t.Fatalf("APIKey = %q, want %q", cfg.APIKey, key)
+		}
+	}
+	back, err := loadConfig(nil)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if back.APIKey != "server-key" {
+		t.Errorf("APIKey = %q — a previous call's key outlived it", back.APIKey)
+	}
+}
+
+// A caller that expands nothing hands over "${SIM_API_KEY}" verbatim; dialling
+// that would be worse than falling back.
+func TestAnUnexpandedPlaceholderInACallIsNotAKey(t *testing.T) {
+	clearEnv(t)
+	t.Setenv(envAPIKey, "server-key")
+	cfg, err := loadConfig(&simOverride{APIKey: "${SIM_API_KEY}", BaseURL: "${SIM_BASE_URL}"})
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.APIKey != "server-key" {
+		t.Errorf("APIKey = %q, want the environment's", cfg.APIKey)
+	}
+}
+
+// With no key anywhere the message must name both ways of giving one: a
+// service that passes them per call reads "set it in the env" as a dead end.
+func TestMissingKeyNamesBothWaysToGiveOne(t *testing.T) {
+	clearEnv(t)
+	_, err := loadConfig(nil)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, want := range []string{"sim.api_key", envAPIKey} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }
