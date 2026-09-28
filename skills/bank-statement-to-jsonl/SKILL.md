@@ -64,6 +64,11 @@ every transaction with the moment somebody hit print. All three emit no
 
 ## Pass 0 — take your own copy of the toolkit
 
+`<skill-dir>` is this skill's own directory: `skill_view` returns it as
+`skill_dir`, and the sibling skills sit beside it. Do not guess it — a
+guessed path that happens to exist is how a run reads a half-copied tree
+and concludes the script was never shipped.
+
     python3 <skill-dir>/scripts/init_workspace.py <file>
 
 This drops **copies** of `statement_lib.py`, `probe.py` and `validate.py` into
@@ -167,6 +172,18 @@ the one you want from four that look exactly as plausible. A column whose
 values are all identical is dropped: that is a fee column, not an amount.
 Where nothing is confirmed, the proposal falls back to position and is a
 guess — treat it as one.
+
+**`OVERLAPPING TEXT LAYERS`, when the probe prints it, is not advisory.** It
+means a page draws the date, the description and the amount as layers of
+characters with no gap between them, and that the default word tolerance is
+therefore reading an amount as a different number — the probe prints which
+amount, what it is read as and what it is. `-29 355.00` glued onto the
+description arrives as `355.00`: the right column, the right shape, the right
+row count, a **credit of 355** where the statement means a **debit of 29 355**.
+Copy the `x_tolerance = 1` the proposal then carries. Skip it and the run still
+parses; what catches it is the reconciliation gate, hours later, as a number
+that does not add up rather than as a cause — which is exactly how one real run
+spent ten minutes of its wall clock.
 
 **Never `cat` the file, never Read a PDF, never dump the text layer.** A
 four-page statement survives it; a four-hundred-page one ends the run with a

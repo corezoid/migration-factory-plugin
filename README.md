@@ -183,16 +183,28 @@ having checked one. A verdict the tool computes cannot be misread that way.
 ### What a write leaves behind
 
 Besides refreshing the export, a `write: true` run keeps `result.json` beside
-the ops file — the running tally of what this document has done to the graph:
+the ops file — the running tally of what this document has done to the graph.
+`post_statement` writes into the same file, so the tally is the whole run:
 
 ```json
 {
     "количество заполненных дырок": 10,
     "количество обновленных акторов": 5,
     "количество созданных акторов": 5,
+    "количество проведенных транзакций": 336,
     "заполненные дырки": ["<uuid>", "..."],
     "обновленные акторы": ["<uuid>", "..."],
-    "созданные акторы": ["<uuid>", "..."]
+    "созданные акторы": ["<uuid>", "..."],
+    "проведенные выписки": [
+        {
+            "ref": "stmt|<actor-uuid>|Bank Transaction|bank_statement_transactions.jsonl",
+            "файл": "bank_statement_transactions.jsonl",
+            "актор": "<actor-uuid>",
+            "счет": "Bank Transaction",
+            "транзакций": 336,
+            "обороты": [{"валюта": "UAH", "дебет": 823750.52, "кредит": 820479.47}]
+        }
+    ]
 }
 ```
 
@@ -648,6 +660,16 @@ shows one placeholder per type. Whether *this* client already exists is a
 question only `find_records` answers, and the placeholder may already hold a
 different client — in which case the answer is a record of its own beside it.
 Overwriting the occupant would delete a real client to make room for another.
+
+**Where the transactions are counted.** `post_statement` adds its own entry to
+`result.json` — one per statement, not one per row: the rows carry no uuid to
+deduplicate by, and three hundred of them would drown the file. An entry is
+replaced by its `ref` rather than appended beside, so posting the same file
+twice leaves the same tally, which is the only reading consistent with posting
+being idempotent by ref. `dir` says where the file is and defaults to the
+directory the JSONL is in. A dry run records nothing. Before this the tally
+counted only what `apply_graph` touched, and a run that loaded three hundred
+transactions reported the one hole it filled.
 
 **Why the actor id comes from the apply.** `apply_graph` stamps the uuid it
 resolved onto every op and lists created records in `result.json`. That uuid is

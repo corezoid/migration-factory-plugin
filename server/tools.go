@@ -237,7 +237,9 @@ func toolDefs() []any {
 				"failures.\n\n" +
 				"Run it with `dry_run` first on anything unfamiliar: that resolves the pairs and totals " +
 				"the file per currency without posting, which is the cheapest way to see that the " +
-				"turnovers match the statement before any of it is written.",
+				"turnovers match the statement before any of it is written.\n\n" +
+				"What it posted is added to the run's result.json beside what apply_graph wrote, so " +
+				"the tally is the whole run rather than its graph half. A dry run records nothing.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -257,6 +259,14 @@ func toolDefs() []any {
 						"type": "string",
 						"description": "Path to the .jsonl, one transaction per line, with " +
 							"transaction_date, debit_sum, credit_sum, currency and description.",
+					},
+					"dir": map[string]any{
+						"type": "string",
+						"description": "Where result.json is kept — the export directory of the same run. " +
+							"Defaults to the directory `path` is in, which is where a run puts both. " +
+							"The posting is recorded there as one entry per statement (the rows have " +
+							"no uuid to deduplicate by, and the entry is replaced on a re-run, so " +
+							"posting the same file twice does not double the tally).",
 					},
 					"ref_prefix": map[string]any{
 						"type": "string",
@@ -759,6 +769,7 @@ type postStatementArgs struct {
 	AccountID string       `json:"account_id"`
 	ActorID   string       `json:"actor_id"`
 	Path      string       `json:"path"`
+	Dir       string       `json:"dir"`
 	RefPrefix string       `json:"ref_prefix"`
 	Timezone  string       `json:"timezone"`
 	DryRun    bool         `json:"dry_run"`
@@ -811,7 +822,61 @@ func runPostStatement(raw json.RawMessage) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return renderPostStatement(res, args, start), nil
+	text := renderPostStatement(res, args, start)
+	if warn := recordStatement(args, path, res); warn != "" {
+		text += "\n" + warn
+	}
+	return text, nil
+}
+
+// recordStatement folds the posting into result.json, the tally the apply
+// keeps beside the ops file — until now it counted only what apply_graph
+// touched, so a run that loaded three hundred transactions reported the one
+// hole it filled and nothing else.
+//
+// It runs after the rows are written and reports its own failure as a warning
+// rather than an error: the money is already on the actor, and a tally that
+// could not be saved must not read as a posting that did not happen. A dry run
+// writes nothing at all — it changed nothing to record.
+func recordStatement(args postStatementArgs, path string, res *ledger.Result) string {
+	if args.DryRun || res.Posted+res.Duplicate == 0 {
+		return ""
+	}
+	dir := strings.TrimSpace(args.Dir)
+	if dir == "" {
+		// The JSONL sits in the run directory, which is also where the export
+		// and its result.json are. Asking for `dir` again would be asking for
+		// what the path already says.
+		dir = filepath.Dir(path)
+	}
+	dir, err := resolve(dir)
+	if err != nil {
+		return "note: the posting is not in result.json — " + err.Error()
+	}
+	resultPath := filepath.Join(dir, graph.ResultFileName)
+
+	tally, err := graph.LoadResult(resultPath)
+	if err != nil {
+		return "note: the posting is not in result.json — " + err.Error()
+	}
+	rec := graph.StatementRecord{
+		Ref:          graph.StatementRef(args.RefPrefix, args.ActorID, args.AccountID, path),
+		File:         filepath.Base(path),
+		ActorID:      args.ActorID,
+		Account:      args.AccountID,
+		Transactions: res.Posted + res.Duplicate,
+		Failed:       res.Skipped,
+	}
+	for _, c := range res.Currencies {
+		rec.Turnover = append(rec.Turnover, graph.StatementTurnover{
+			Currency: c.Currency, Debit: c.Debit, Credit: c.Credit,
+		})
+	}
+	tally.AddStatement(rec)
+	if err := graph.WriteResult(resultPath, tally); err != nil {
+		return "note: the posting is not in result.json — " + err.Error()
+	}
+	return ""
 }
 
 func renderPostStatement(res *ledger.Result, args postStatementArgs, start time.Time) string {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ResultFileName is the tally an apply keeps beside the ops file.
@@ -21,12 +22,21 @@ type RunResult struct {
 	ActorsUpdated int `json:"количество обновленных акторов"`
 	ActorsCreated int `json:"количество созданных акторов"`
 
+	// TransactionsPosted is the rows post_statement put on the actors of this
+	// run. It hangs here beside the three above because a run that loaded a
+	// statement did most of its work in them, and a tally that counts only
+	// actors reads as if it did almost nothing.
+	TransactionsPosted int `json:"количество проведенных транзакций"`
+
 	// The id lists the counts are derived from — never assigned to, only
 	// unioned into, which is what makes a second apply of the same file add
 	// nothing instead of doubling the tally.
 	Holes   []string `json:"заполненные дырки"`
 	Updated []string `json:"обновленные акторы"`
 	Created []string `json:"созданные акторы"`
+
+	// Statements is the record TransactionsPosted is counted from.
+	Statements []StatementRecord `json:"проведенные выписки"`
 }
 
 // LoadResult reads the tally a previous run left. A missing file is an empty
@@ -106,6 +116,13 @@ func (r *RunResult) recount() {
 			*list = []string{}
 		}
 	}
+	r.TransactionsPosted = 0
+	for _, s := range r.Statements {
+		r.TransactionsPosted += s.Transactions
+	}
+	if r.Statements == nil {
+		r.Statements = []StatementRecord{}
+	}
 }
 
 // WriteResult saves the tally.
@@ -152,4 +169,57 @@ func recordResult(opts ApplyOptions, res *ApplyResult) error {
 	}
 	res.Result, res.ResultPath = tally, path
 	return nil
+}
+
+// StatementRecord is one bank statement posted onto an actor by post_statement.
+//
+// Transactions are not actors: they have no uuid the tally could deduplicate by,
+// and three hundred of them would drown the file. So the record is the statement
+// rather than the row — what landed, on whom, under which account name, and the
+// turnovers it landed with. That is also the fact that stays true on a re-run:
+// posting is idempotent by ref, so the second run writes nothing new and the
+// entry must read the same, which is why an entry is replaced by Ref and never
+// added to.
+type StatementRecord struct {
+	Ref          string              `json:"ref"`
+	File         string              `json:"файл"`
+	ActorID      string              `json:"актор"`
+	Account      string              `json:"счет"`
+	Transactions int                 `json:"транзакций"`
+	Failed       int                 `json:"не проведено,omitempty"`
+	Turnover     []StatementTurnover `json:"обороты"`
+}
+
+// StatementTurnover is one currency's share of a statement, the pair of numbers
+// the statement prints about itself and the only ones comparable with it.
+type StatementTurnover struct {
+	Currency string  `json:"валюта"`
+	Debit    float64 `json:"дебет"`
+	Credit   float64 `json:"кредит"`
+}
+
+// StatementRef is the identity of a posting: the same file, on the same actor,
+// under the same account name and ref prefix, is the same posting however many
+// times it runs. A different prefix is a deliberate second posting of the same
+// statement, so it is a different entry.
+func StatementRef(prefix, actorID, account, file string) string {
+	if prefix == "" {
+		prefix = "stmt"
+	}
+	return strings.Join([]string{prefix, actorID, account, filepath.Base(file)}, "|")
+}
+
+// AddStatement folds one posting into the tally, replacing the entry with the
+// same Ref rather than appending beside it. It reports whether the entry was new.
+func (r *RunResult) AddStatement(rec StatementRecord) bool {
+	for i := range r.Statements {
+		if r.Statements[i].Ref == rec.Ref {
+			r.Statements[i] = rec
+			r.recount()
+			return false
+		}
+	}
+	r.Statements = append(r.Statements, rec)
+	r.recount()
+	return true
 }

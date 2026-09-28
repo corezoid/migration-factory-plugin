@@ -46,6 +46,11 @@ them and an unchecked subject is never created.
 
 ## Pass 1 — what the graph is missing
 
+`<skill-dir>` is this skill's own directory: `skill_view` returns it as
+`skill_dir`, and the sibling skills sit beside it. Do not guess it — a
+guessed path that happens to exist is how a run reads a half-copied tree
+and concludes the script was never shipped.
+
     export_graph(layer: "<layer-uuid>", dir: "<dir>")
     python3 <skill-dir>/scripts/holes.py <export>/graph.values.yaml <export>/types.schema.yaml
 

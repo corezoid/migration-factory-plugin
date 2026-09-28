@@ -61,6 +61,11 @@ number, an email — name those fields in `fields:` and they are probed in the o
 
 ## The sources
 
+`<skill-dir>` is this skill's own directory: `skill_view` returns it as
+`skill_dir`, and the sibling skills sit beside it. Do not guess it — a
+guessed path that happens to exist is how a run reads a half-copied tree
+and concludes the script was never shipped.
+
 `.pdf` — pull the text layer yourself: `pdftotext -layout <file> -`, else
 `pdfplumber` (keeps a label and its value on one line better than PyMuPDF), plus
 `extract_tables()` when a table holds what the text layer loses. A scan has no text layer and there is no OCR engine

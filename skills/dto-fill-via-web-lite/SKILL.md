@@ -90,6 +90,11 @@ created here.
 
 ## 4 — read the pages, at most two
 
+`<skill-dir>` is this skill's own directory: `skill_view` returns it as
+`skill_dir`, and the sibling skills sit beside it. Do not guess it — a
+guessed path that happens to exist is how a run reads a half-copied tree
+and concludes the script was never shipped.
+
 **Page one is the one you were handed.** A `.md` — read it. A saved HTML page:
 
     python3 <skill-dir>/scripts/page.py <file> --base <url> --max 8000

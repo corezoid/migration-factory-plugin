@@ -47,6 +47,11 @@ Do not read `types.schema.yaml` (~100 KB) and do not open `graph.ids.json`.
 
 ## 2 — the head of the document
 
+`<skill-dir>` is this skill's own directory: `skill_view` returns it as
+`skill_dir`, and the sibling skills sit beside it. Do not guess it — a
+guessed path that happens to exist is how a run reads a half-copied tree
+and concludes the script was never shipped.
+
     python3 <skill-dir>/scripts/top.py <file>
 
 At most two pages, cut the same way every run, with a last line saying how much

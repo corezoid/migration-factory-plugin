@@ -88,6 +88,44 @@ def money_tokens(words, cents_only=True):
                 yield w
 
 
+def glued_money(page):
+    """Amounts the default word tolerance reads as a different number.
+
+    Some statements draw the date, the description and the amount as three
+    layers of characters on one line, with no gap between where one ends and
+    the next begins. pdfplumber joins characters into words by distance, so at
+    its default tolerance the head of the amount is swallowed by the
+    description: `-29 355.00` comes out as `...KVASYLIV,UA-29` plus `355.00`,
+    and the row is booked as a **credit of 355** where the statement means a
+    **debit of 29 355**.
+
+    Nothing downstream can catch that. `355.00` is perfectly good money, it
+    lands in the amount band, the row count is right, and join_spaced_numbers
+    has no `-29` cell left to rejoin. Only the statement's own totals disagree,
+    and only by the rows it happened to -- which is why a run that meets it
+    spends its time hunting a number instead of a mechanism.
+
+    The signature is not a token that appears at a tighter tolerance (a page
+    header splits harmlessly all the time). It is an amount whose **value
+    changes** while its right edge stays put: the column is the same, the money
+    is not. Anything else is noise and is not worth a warning that would then
+    be ignored.
+    """
+
+    def by_edge(rows):
+        out = {}
+        for row in rows:
+            for m in money_tokens(row):
+                out[round(m.x1, 1)] = m.text
+        return out
+
+    loose = by_edge(rows_of(page))
+    tight = by_edge(rows_of(page, x_tolerance=1))
+    return [(edge, loose[edge], text)
+            for edge, text in sorted(tight.items())
+            if edge in loose and loose[edge] != text]
+
+
 def cluster(edges, tol):
     """Single-link cluster of x1 values."""
     if not edges:
@@ -104,8 +142,10 @@ def cluster(edges, tol):
     return out
 
 
-def rows_of(page, tol=2.0):
-    ws = [w for w in page.extract_words() if 0 <= w['top'] <= page.height]
+def rows_of(page, tol=2.0, x_tolerance=None):
+    words = page.extract_words() if x_tolerance is None \
+        else page.extract_words(x_tolerance=x_tolerance)
+    ws = [w for w in words if 0 <= w['top'] <= page.height]
     ws.sort(key=lambda w: (w['top'], w['x0']))
     out, cur, anchor = [], [], None
 
@@ -196,8 +236,11 @@ def main(argv):
         totals, amount_rows, date_rows = [], 0, 0
         decimal_less = 0
 
+        glued = []
         for p in picks:
             page = pdf.pages[p - 1]
+            for edge, was, now in glued_money(page):
+                glued.append((p, was, now, edge))
             for row in rows_of(page):
                 text = ' '.join(w.text for w in row)
                 cash = list(money_tokens(row))
@@ -434,6 +477,23 @@ def main(argv):
             for p, t in totals[:14]:
                 w('  p%-3d %s\n' % (p, t))
 
+        # ---- overlapping text layers --------------------------------------
+        if glued:
+            w('\nOVERLAPPING TEXT LAYERS -- %d amount(s) on %d of the sampled pages\n'
+              'read as a DIFFERENT NUMBER at the default word tolerance. The page\n'
+              'draws the date, the description and the amount with no gap between\n'
+              'them, so the head of the amount is glued onto the end of the\n'
+              'description: the row keeps its cents and loses its thousands, and it\n'
+              'still looks like perfectly good money in the right column.\n'
+              '`x_tolerance = 1` in the spec below is the fix. Without it the\n'
+              'reconciliation gate is what finds this -- hours later, and as a\n'
+              'number that does not add up rather than as a cause.\n'
+              % (len(glued), len({g[0] for g in glued})))
+            for pg, was, now, edge in glued[:8]:
+                w('  p%-3d x1 %-7.1f  read as %-14s  is %s\n' % (pg, edge, was, now))
+            if len(glued) > 8:
+                w('  ... and %d more\n' % (len(glued) - 8))
+
         # ---- proposal -----------------------------------------------------
         if scored:
             w('\nCANDIDATE AMOUNT COLUMNS  (constant columns dropped)\n')
@@ -458,6 +518,8 @@ def main(argv):
             w('    %-11s = (%d, %d),%s\n'
               % (lab, int(nm[1] - 12), int(nm[2] + 4), note))
         w("    numbers     = '%s',\n" % style)
+        if glued:
+            w('    x_tolerance = 1,   # overlapping text layers -- see above\n')
         if big and date_edges:
             # The date COLUMN, not the right-most date on the page. A statement
             # prints dates in its boilerplate too -- a licence date here sits at

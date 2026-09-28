@@ -27,6 +27,13 @@
       "private": true
     },
     {
+      "name": "UABank card (overlapping layers)",
+      "file": "report_25-09-26_07-52-051.pdf",
+      "spec": "parse_uabank_card_overlap.py",
+      "shape": "the same bank as above, plus a page whose text layers overlap: at the default word tolerance one amount's thousands are glued onto the description and the row reads as a credit of 355 instead of a debit of 29 355 -- the count is right either way and only the printed totals disagree",
+      "private": true
+    },
+    {
       "name": "demo sheet",
       "file": "fixtures/sheet.csv",
       "spec": "parse_demo_sheet.py",

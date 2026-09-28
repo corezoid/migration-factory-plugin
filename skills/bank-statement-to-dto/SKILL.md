@@ -44,7 +44,13 @@ before reading a line of the statement:
        directory. Do not declare it done until both gates pass — the format
        gate and the reconciliation gate against the totals the statement
        prints about itself. Report the counts, the reconciliation, and the
-       absolute path of the JSONL.")
+       absolute path of the JSONL.
+       Last of all, write one sentinel file beside the JSONL, so the main run
+       can collect you without reading your transcript:
+         both gates passed -> `parser.done`, holding the counts and the two
+                              turnovers;
+         anything else     -> `parser.failed`, holding the reason.
+       One of the two, written once, written last.")
 
 **It goes first because it is the long pole and nothing else waits on it.**
 Parsing probes a page, writes a spec, streams the file and reconciles; the
@@ -52,9 +58,20 @@ graph work needs none of that, only the header. Started first, it costs the run
 nothing. Started after the ops are applied, it costs the run its whole duration.
 
 Do not read its output while it works, and do not poll it. Pick it up in pass
-5, which is the first moment its answer is needed.
+5, which is the first moment its answer is needed — and pick it up by waiting
+for the sentinel, not by tailing the other agent's log.
+
+That is the difference between waiting and sampling, and it is the whole cost:
+one real run tailed the delegate's transcript eight times across twelve
+minutes and pulled forty kilobytes of somebody else's debugging into a context
+that still had the graph work to hold. Waiting on a file costs one line.
 
 ## Pass 1 — the header, and only the header
+
+`<skill-dir>` is this skill's own directory: `skill_view` returns it as
+`skill_dir`, and the sibling skills sit beside it. Do not guess it — a
+guessed path that happens to exist is how a run reads a half-copied tree
+and concludes the script was never shipped.
 
     python3 <skill-dir>/../bank-statement-to-jsonl/scripts/probe.py <file>
 
@@ -158,7 +175,15 @@ stranger's accounts — the one error in this run that no later ops file undoes.
 
 ## Pass 5 — collect the parser, then post
 
-Now, and not before, read the second agent's report.
+Now, and not before. Wait for the sentinel in one blocking call, with a long
+tool timeout — each call waits, it does not sample:
+
+    i=0; while [ $i -lt 90 ] && [ ! -f parser.done ] && [ ! -f parser.failed ]; \
+      do sleep 20; i=$((i+1)); done; cat parser.done parser.failed 2>/dev/null
+
+Thirty minutes a call. Neither file there when it returns? Run the same line
+again. Do not reach for the transcript in between: the sentinel is the answer,
+and everything before it is the other agent's working out.
 
 | it says | do |
 |---|---|
@@ -213,8 +238,15 @@ Each of these gets a report and no write:
 ## Output
 
     <export>/graph.ops.yaml            the bank and the client
-    <export>/result.json               what the apply changed, cumulative
+    <export>/result.json               the whole run, cumulative: the nodes the
+                                       apply changed AND the statements posted
     bank_statement_transactions.jsonl  the rows, from the parser agent
+    parser.done | parser.failed        the parser agent's sentinel
+
+`post_statement` writes its half of `result.json` itself, so the tally is the
+run and not its graph half. It used to be the graph half alone, and a run that
+loaded three hundred transactions reported the one hole it filled — which is
+what everything downstream then counted.
 
 Report, in this order:
 
