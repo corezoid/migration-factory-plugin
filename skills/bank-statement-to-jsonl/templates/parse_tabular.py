@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Copy me for a spreadsheet or a delimited file.
+"""Copy me for a spreadsheet, a delimited file, or a Word-table export.
 
     python3 parse_<bank>.py <statement.xlsx> -o out.jsonl
+    python3 parse_<bank>.py <statement.csv>  -o out.jsonl
+    python3 parse_<bank>.py <statement.docx> -o out.jsonl
 
-A sheet has no x-coordinates, so a band is a COLUMN INDEX instead: col(4) is
-one column, cols(2,3) is a span. Nothing else in the spec changes -- the same
-number grammars, the same date handling, the same skip/stop rules, the same
-two gates. That is the point of one spec shape for every input.
+None of these have x-coordinates, so a band is a COLUMN INDEX instead: col(4)
+is one column, cols(2,3) is a span -- the same index whether it came from a
+sheet column, a delimited field, or a `<w:tc>` in a Word table row. Nothing
+else in the spec changes -- the same number grammars, the same date handling,
+the same skip/stop rules, the same two gates. That is the point of one spec
+shape for every input. `.xls` and `.doc` work the same way: `statement_lib`
+converts each to `.xlsx`/`.docx` with LibreOffice before reading it.
 
 Continuation merging works here too, and is usually what you want: exports
 that wrap a long narrative across rows leave the amount columns empty on the

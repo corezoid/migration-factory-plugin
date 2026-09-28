@@ -34,10 +34,15 @@ throughout so that summing 40,000 rows is exact.
 """
 
 import csv
+import html
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -69,6 +74,90 @@ def _need(module, why):
     raise StatementError(
         "statement_lib: %s is required %s.\n"
         "    python3 -m pip install %s" % (module, why, module))
+
+
+_CONVERT_CACHE = {}  # (original path, target ext) -> converted path, this run only
+
+
+def _convert_via_libreoffice(path, target_ext):
+    """Legacy `.xls`/`.doc` are OLE containers no pure-Python reader in this
+    file opens, and there is no reason to write one when LibreOffice already
+    does the conversion correctly. Cached per (path, target_ext): probing and
+    the full parse both call this for the same file, and a large workbook
+    should not pay for the conversion twice.
+    """
+    key = (path, target_ext)
+    if key in _CONVERT_CACHE:
+        return _CONVERT_CACHE[key]
+    soffice = shutil.which('soffice') or shutil.which('libreoffice')
+    if not soffice:
+        raise StatementError(
+            "statement_lib: %s needs LibreOffice to convert — install it and "
+            "retry\n"
+            "    apt-get install -y libreoffice   (Debian/Ubuntu)\n"
+            "    brew install --cask libreoffice  (macOS)" % os.path.basename(path))
+    tmp = tempfile.mkdtemp(prefix='lo-convert-')
+    run = subprocess.run(
+        [soffice, '--headless', '--norestore', '--convert-to', target_ext,
+         '--outdir', tmp, path],
+        capture_output=True, text=True, timeout=180)
+    out = os.path.join(tmp, os.path.splitext(os.path.basename(path))[0]
+                        + '.' + target_ext)
+    if run.returncode or not os.path.isfile(out):
+        raise StatementError(
+            "statement_lib: LibreOffice could not convert %s to .%s: %s"
+            % (os.path.basename(path), target_ext,
+               (run.stderr or run.stdout).strip() or "no output produced"))
+    _CONVERT_CACHE[key] = out
+    return out
+
+
+def _xls_to_xlsx(path):
+    """Kept as its own name for the callers that only ever mean this one
+    conversion; see `_convert_via_libreoffice` for what it actually does."""
+    return _convert_via_libreoffice(path, 'xlsx')
+
+
+_WORD_ROW = re.compile(r'<w:tr\b.*?</w:tr>', re.S)
+_WORD_CELL = re.compile(r'<w:tc\b.*?</w:tc>', re.S)
+_WORD_TAG = re.compile(r'<[^>]+>')
+
+
+def _docx_cell_text(cell_xml):
+    """A cell's text, paragraphs joined by a space — a cell is one value, and
+    a table cell wrapping onto two lines in Word is still one value here."""
+    return html.unescape(_WORD_TAG.sub('', cell_xml.replace('</w:p>', ' '))).strip()
+
+
+def _docx_table_cells(path):
+    """Every row of every table in a .docx, as plain cell strings — no spec,
+    no bands, just what the file contains. Used both to probe the file and,
+    with `spec.header_rows` applied on top, to read it for real.
+
+    Naive on purpose: it does not distinguish one table from another, and a
+    nested table inside a cell confuses the row regex. That is enough for a
+    simple exported grid; a statement laid out with nested tables belongs in
+    `from_scratch.py`, same as any other source ColumnSpec cannot express.
+    """
+    with zipfile.ZipFile(path) as z:
+        xml = z.read('word/document.xml').decode('utf-8', 'replace')
+    for row_xml in _WORD_ROW.findall(xml):
+        yield [_docx_cell_text(c) for c in _WORD_CELL.findall(row_xml)]
+
+
+def docx_table_rows(spec, path, pages=None, on_page=None):
+    """A Word-table statement — rare, but some core banking systems export
+    exactly this. A table cell has no coordinates; its column index is the
+    band, the same as a sheet, so this shares `_tabular_row` with xlsx/csv.
+    """
+    if path.lower().endswith('.doc'):
+        path = _convert_via_libreoffice(path, 'docx')
+    for n, cells in enumerate(_docx_table_cells(path)):
+        if n < spec.header_rows:
+            continue
+        if on_page and n % 5000 == 0:
+            on_page(n, 0)
+        yield _tabular_row(cells, 1)
 
 
 # --------------------------------------------------------------------------
@@ -467,6 +556,8 @@ def _tabular_row(values, page):
 
 
 def xlsx_rows(spec, path, pages=None, on_page=None):
+    if path.lower().endswith('.xls'):
+        path = _xls_to_xlsx(path)
     try:
         import openpyxl
     except ImportError:
@@ -523,15 +614,12 @@ def rows_for(path):
     ext = os.path.splitext(path)[1].lower()
     if ext == '.pdf':
         return pdf_rows
-    if ext in ('.xlsx', '.xlsm'):
-        return xlsx_rows
+    if ext in ('.xlsx', '.xlsm', '.xls'):
+        return xlsx_rows  # .xls converts to .xlsx first, inside xlsx_rows
+    if ext in ('.docx', '.doc'):
+        return docx_table_rows  # .doc converts to .docx first, inside it
     if ext in ('.csv', '.tsv'):
         return csv_rows
-    if ext == '.xls':
-        raise StatementError(
-            "legacy .xls cannot be read here: xlrd is not installed and there "
-            "is no LibreOffice to convert it.\n"
-            "Ask for the file re-saved as .xlsx or .csv -- that is the whole fix.")
     return text_rows
 
 

@@ -1,6 +1,6 @@
 ---
 name: bank-statement-to-jsonl
-description: Turn a bank statement into JSONL, one object per transaction, without reading it — sample one page, work out from the x-coordinates which column each number is in, declare a ColumnSpec, write a thin parser on scripts/statement_lib.py, stream the file through it, and prove it against the totals the statement prints about itself. Handles pdf, xlsx, csv and text exports, hundreds of pages, us (1,163.14) and eu (1.238,92) formats. Use when the user hands over a bank statement, an account extract, a card statement or a transaction export and asks to parse it, turn it into jsonl or json or rows, or pull the transactions out of it. Triggers on "распарси выписку", "выписка банка в jsonl", "сделай парсер выписки", "разбери банковскую выписку", "вытащи транзакции из выписки", "конвертируй выписку в json", "выписка из pdf в jsonl", "parse this bank statement", "bank statement to jsonl", "extract the transactions from this statement", "write a parser for this statement", "/bank-statement-to-jsonl".
+description: Turn a bank statement into JSONL, one object per transaction, without reading it — sample one page, work out from the x-coordinates which column each number is in, declare a ColumnSpec, write a thin parser on scripts/statement_lib.py, stream the file through it, and prove it against the totals the statement prints about itself. Handles pdf, xlsx, legacy xls, csv, a Word-table export (docx/doc) and text exports, hundreds of pages, us (1,163.14) and eu (1.238,92) formats. Use when the user hands over a bank statement, an account extract, a card statement or a transaction export and asks to parse it, turn it into jsonl or json or rows, or pull the transactions out of it. Triggers on "распарси выписку", "выписка банка в jsonl", "сделай парсер выписки", "разбери банковскую выписку", "вытащи транзакции из выписки", "конвертируй выписку в json", "выписка из pdf в jsonl", "parse this bank statement", "bank statement to jsonl", "extract the transactions from this statement", "write a parser for this statement", "/bank-statement-to-jsonl".
 ---
 
 # bank-statement-to-jsonl — the column is the meaning
@@ -28,9 +28,11 @@ for, and it is why a run does not end without it.
 
     /bank-statement-to-jsonl <file> [out <path.jsonl>] [pages <a-b>]
 
-- `<file>` — the statement: `.pdf`, `.xlsx`, `.csv`, `.txt`, or anything else
-  with a text layer. Size is not a reason to refuse and not a reason to sample
-  the *output*. Hundreds of pages is the case this is built for.
+- `<file>` — the statement: `.pdf`, `.xlsx`, `.xls` (converted to `.xlsx` with
+  LibreOffice first), `.docx` or `.doc` (a Word-table export — `.doc` converts
+  to `.docx` the same way), `.csv`, `.txt`, or anything else with a text layer.
+  Size is not a reason to refuse and not a reason to sample the *output*.
+  Hundreds of pages is the case this is built for.
 - `out` — where the JSONL lands. Defaults to the statement's stem with a
   `.jsonl` suffix, beside it.
 - `pages` — a page range, **only when the caller asks for one**. A range you
@@ -333,7 +335,9 @@ amounts; the probe counts the decimal-less tokens so the choice is informed.
 Confirm its bands against the page dump, fill in what the probe left
 commented — `description`, `stop_re`, and the `expect_*` totals — and run it.
 (For a statement the probe could not pre-fill, `<skill-dir>/templates/` holds
-bare skeletons for pdf and for tabular input.)
+bare skeletons for pdf and for tabular input — the tabular one covers
+`.xlsx`/`.csv` and the `.docx` Word-table shape alike, since a band is a
+column index in all three.)
 
 **The spec is the parser — do not write it twice.** No prose rehearsal of the
 bands before declaring them, no *"the debit column appears to be at
@@ -437,9 +441,11 @@ step.
   transcription and not parsing — worth it for a handful of pages, and only
   with the totals gate carrying the whole proof.
 - **A password-protected PDF.** Ask for the password. Do not try any.
-- **A legacy `.xls`.** `xlrd` is not installed and there is no LibreOffice, so
-  nothing here opens it. Ask for `.xlsx` or `.csv`; naming the one-line fix is
-  the entire value of the refusal.
+- **A legacy `.xls` with no LibreOffice on the machine.** `probe.py` and
+  `statement_lib.py` convert `.xls` to `.xlsx` with LibreOffice before reading
+  it — install it and retry (`apt-get install -y libreoffice` or `brew install
+  --cask libreoffice`); only a machine with neither Python's `.xls` reader nor
+  that tool is a genuine dead end.
 - **One unsigned amount column with no direction token.** Show the caller two
   rows you cannot tell apart and ask which is which.
 - **Two currencies or two accounts in one file.** Summing across them is

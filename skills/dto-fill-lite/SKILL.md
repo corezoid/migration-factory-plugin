@@ -62,11 +62,13 @@ Read what comes back, all of it, once. Do not go back to the file for more —
 if the head does not name the company, the answer is that it does not, and the
 run says so.
 
-`top.py` reads `.docx`, `.xlsx` and `.pptx` as well, through `office.py` beside
-it and under this same budget — they are zips of XML, so `cat` on one prints
-binary. What it refuses by name is an image and a legacy `.doc`/`.xls`/`.ppt`:
-the first goes to Read, the second is a request for a different file. Either
-way, take the head of it and come straight back.
+`top.py` reads every format `office.py` knows as well — `.docx .xlsx .pptx`,
+the legacy binaries `.doc .xls .ppt`, the OpenDocument formats `.odt .ods
+.odp`, `.rtf` and Outlook `.msg` — through `office.py` beside it and under this
+same budget. A reader that needs a package or LibreOffice not already present
+says the exact install line; install it and run `top.py` again. The one thing
+this refuses by name is an image, which goes to Read instead. Either way, take
+the head of it and come straight back.
 
 ## 3 — whose facts are these
 

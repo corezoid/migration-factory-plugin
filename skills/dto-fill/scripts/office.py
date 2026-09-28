@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Read a .docx, .xlsx or .pptx as plain text.
+"""Read a document `cat` cannot — any Office, OpenDocument, RTF, Outlook .msg
+or raw HTML file — as plain text.
 
     office.py <file> [--chars N] [--rows N] [--notes]
 
@@ -8,25 +9,37 @@
     --notes   .pptx only: also print the speaker notes under each slide
 
 Text formats need nothing — `cat` is the whole story for .txt, .md, .csv,
-.json, .eml or a saved page, and a PDF has `pdftotext -layout`. These three are
-neither: they are zip archives of XML, and `cat` on one prints binary. So this
-opens the zip and prints what a reader would see, on stdout, so the source
-arrives as text like every other source.
+.json, .eml or a saved page, and a PDF has `pdftotext -layout`. Everything
+here is a binary container of one kind or another, so each family needs its
+own way in:
 
-.docx and .pptx cost nothing to open — zipfile and the standard library are the
-whole dependency, which is the point: the image has no python-docx and no
-python-pptx, and a run that stops to install one is a run that stops. .xlsx
-goes through openpyxl, which is on the image; if it ever is not, the message is
-the pip line rather than a traceback 300 rows in.
+  .docx .xlsx .pptx  zip archives of XML — opened directly, .docx and .pptx
+                      on the standard library alone, .xlsx through openpyxl
+  .doc .ppt .xls      OLE or ODF containers no pure-Python reader here
+  .odt .ods .odp      parses; LibreOffice converts each to the OOXML sibling
+  .rtf                above and the same reader takes it from there
+  .msg                an Outlook message, read with extract-msg
+  .html .htm          a raw saved page (not one read_page already rendered to
+                      Markdown) — read with the standard library alone
 
-The last line says how much was left unread — a run that saw two sheets of nine
-has to be able to say so rather than imply the workbook was thin.
+A run stopping to install something used to be the reason the legacy formats
+were refused by name — the image had neither python-docx nor LibreOffice, and
+a run that stalls on a network install is worse than one that names the
+format and stops. That constraint is gone: install what a reader asks for and
+retry. Every reader that needs something not on the standard library says the
+exact line to run rather than raising a traceback partway through a document.
+
+The last line says how much was left unread — a run that saw two sheets of
+nine has to be able to say so rather than imply the workbook was thin.
 """
 
 import html
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import warnings
 import zipfile
 
@@ -42,16 +55,16 @@ DOCX_BREAKS = [("</w:tc>", "\t"), ("</w:tr>", "\n"), ("</w:p>", "\n"),
                ("<w:tab/>", "\t"), ("<w:tab />", "\t")]
 PPTX_BREAKS = [("</a:tc>", "\t"), ("</a:tr>", "\n"), ("</a:p>", "\n"),
                ("<a:br/>", "\n"), ("<a:br />", "\n")]
+HTML_BREAKS = [("</p>", "\n\n"), ("<br>", "\n"), ("<br/>", "\n"), ("<br />", "\n"),
+               ("</tr>", "\n"), ("</td>", "\t"), ("</th>", "\t"),
+               ("</li>", "\n"), ("</h1>", "\n\n"), ("</h2>", "\n\n"),
+               ("</h3>", "\n\n"), ("</div>", "\n")]
+HTML_DROP = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1>", re.I | re.S)
 
 SLIDE = re.compile(r"^ppt/slides/slide(\d+)\.xml$")
 NOTES = re.compile(r"^ppt/notesSlides/notesSlide(\d+)\.xml$")
 HEADER = re.compile(r"^word/header(\d*)\.xml$")
 FOOTER = re.compile(r"^word/footer(\d*)\.xml$")
-
-LEGACY = {
-    ".doc": ".docx", ".xls": ".xlsx", ".ppt": ".pptx",
-    ".odt": ".docx", ".ods": ".xlsx", ".odp": ".pptx",
-}
 
 
 def text_of(xml, breaks):
@@ -170,6 +183,41 @@ def read_xlsx(path, opts):
     return "\n\n".join(chunks), note
 
 
+def read_msg(path, opts):
+    """An Outlook .msg — an OLE compound file, not a zip, so it needs its own
+    reader rather than the zip trick above. extract-msg is pure Python and
+    small; the pip line is the whole ask when it is missing.
+    """
+    try:
+        import extract_msg
+    except ImportError:
+        sys.exit("office.py: extract-msg is required to read .msg\n"
+                 "    python3 -m pip install extract-msg")
+    msg = extract_msg.Message(path)
+    try:
+        head = "\n".join(
+            "%s: %s" % (label, value) for label, value in (
+                ("From", msg.sender), ("To", msg.to), ("Cc", msg.cc),
+                ("Date", msg.date), ("Subject", msg.subject))
+            if value)
+        body = (msg.body or "").strip()
+        note = ("%s not extracted" % plural(len(msg.attachments), "attachment")
+                if msg.attachments else None)
+        return "\n\n".join(c for c in (head, body) if c), note
+    finally:
+        msg.close()
+
+
+def read_html(path, opts):
+    """A raw saved page a user attached — not one `read_page` already rendered
+    to Markdown. `cat` on it prints the tags, so this drops the script/style
+    bodies (code, not content) and runs the same tag-to-text pass as above.
+    """
+    with open(path, encoding="utf-8", errors="replace") as f:
+        raw = f.read()
+    return text_of(HTML_DROP.sub(" ", raw), HTML_BREAKS), None
+
+
 def plural(count, noun):
     """A note that says "1 slides" reads as a bug in the note."""
     return "%d %s%s" % (count, noun, "" if count == 1 else "s")
@@ -189,7 +237,51 @@ def cell(value):
     return text[:10] if text.endswith(" 00:00:00") else text
 
 
-READERS = {".docx": read_docx, ".xlsx": read_xlsx, ".pptx": read_pptx}
+def via_libreoffice(path, opts, target_ext, reader):
+    """Convert a legacy or OpenDocument file to `target_ext`, then hand it to
+    the reader that already knows that format.
+
+    One external tool covers seven formats that would otherwise need seven
+    readers: .doc/.ppt/.xls are OLE compound files, .odt/.ods/.odp are ODF — a
+    different XML dialect from OOXML — and neither family has a pure-Python
+    reader in this file. LibreOffice reads both natively and writes the OOXML
+    this script already understands, so the conversion is the whole fix.
+    """
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        sys.exit(
+            "office.py: %s needs LibreOffice to convert — install it and retry\n"
+            "    apt-get install -y libreoffice   (Debian/Ubuntu)\n"
+            "    brew install --cask libreoffice  (macOS)"
+            % os.path.basename(path))
+    with tempfile.TemporaryDirectory() as tmp:
+        run = subprocess.run(
+            [soffice, "--headless", "--norestore", "--convert-to", target_ext,
+             "--outdir", tmp, path],
+            capture_output=True, text=True, timeout=180)
+        out = os.path.join(tmp, os.path.splitext(os.path.basename(path))[0]
+                            + "." + target_ext)
+        if run.returncode or not os.path.isfile(out):
+            sys.exit("office.py: LibreOffice could not convert %s to .%s: %s"
+                     % (os.path.basename(path), target_ext,
+                        (run.stderr or run.stdout).strip() or "no output produced"))
+        text, note = reader(out, opts)
+    via = "read via LibreOffice conversion from %s" % os.path.splitext(path)[1]
+    return text, (via + "; " + note if note else via)
+
+
+# Zip archives read directly: format checked with zipfile.is_zipfile below.
+READERS = {".docx": read_docx, ".xlsx": read_xlsx, ".pptx": read_pptx,
+           ".msg": read_msg, ".html": read_html, ".htm": read_html}
+
+# Legacy binary and OpenDocument containers: converted to the OOXML sibling
+# reader() already knows, rather than parsed here directly.
+LIBREOFFICE = {
+    ".doc": ("docx", read_docx), ".odt": ("docx", read_docx),
+    ".rtf": ("docx", read_docx),
+    ".ppt": ("pptx", read_pptx), ".odp": ("pptx", read_pptx),
+    ".xls": ("xlsx", read_xlsx), ".ods": ("xlsx", read_xlsx),
+}
 
 
 def main():
@@ -210,20 +302,21 @@ def main():
     if not os.path.isfile(path):
         sys.exit("office.py: no such file: %s" % path)
     ext = os.path.splitext(path)[1].lower()
-    if ext in LEGACY:
-        sys.exit("office.py: %s is the legacy binary format and nothing here "
-                 "opens it — ask for the same file as %s, or convert it"
-                 % (ext, LEGACY[ext]))
-    if ext not in READERS:
-        sys.exit("office.py: %s is not an Office file — .txt .md .csv .json "
-                 ".eml and saved pages read with `cat`, a .pdf with "
-                 "`pdftotext -layout`, an image with the Read tool" % (ext or path))
-    if not zipfile.is_zipfile(path):
-        sys.exit("office.py: %s is not a zip archive — a .docx/.xlsx/.pptx "
-                 "always is, so this file is something else wearing the "
-                 "extension" % os.path.basename(path))
 
-    text, note = READERS[ext](path, opts)
+    if ext in LIBREOFFICE:
+        target_ext, reader = LIBREOFFICE[ext]
+        text, note = via_libreoffice(path, opts, target_ext, reader)
+    elif ext in READERS:
+        if ext in (".docx", ".xlsx", ".pptx") and not zipfile.is_zipfile(path):
+            sys.exit("office.py: %s is not a zip archive — a .docx/.xlsx/.pptx "
+                     "always is, so this file is something else wearing the "
+                     "extension" % os.path.basename(path))
+        text, note = READERS[ext](path, opts)
+    else:
+        sys.exit("office.py: %s is not a format this reads — .txt .md .csv "
+                 ".json .eml and saved pages read with `cat`, a .pdf with "
+                 "`pdftotext -layout`, an image with the Read tool" % (ext or path))
+
     total = len(text)
     if opts["chars"] and total > opts["chars"]:
         cut = text.rfind("\n", 0, opts["chars"])

@@ -13,8 +13,12 @@ that skipped 90% of a file should say so rather than imply the file was thin.
 
 A .docx, .xlsx or .pptx is a zip of XML rather than text, so the head of one is
 cut by `office.py` beside this script, under the same budget and with the same
-last line. A non-zero exit means neither can open the format — an image, a
-legacy .doc/.xls — and the message names what to use instead.
+last line. `office.py` also opens the legacy binaries (.doc/.xls/.ppt), the
+OpenDocument formats (.odt/.ods/.odp), .rtf, Outlook .msg and raw .html — the
+same call, the same budget — converting through LibreOffice or a small pip
+package first where the format needs one, and naming the install line rather
+than half-working if that is missing. What is left unhandled is an image: that
+goes to Read, not here.
 """
 
 import os
@@ -26,16 +30,13 @@ PAGE_CHARS = 3000  # one "page" of plain text, near enough for a budget
 
 PLAIN = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl",
          ".yaml", ".yml", ".eml", ".log", ".xml", ".rst"}
-MARKUP = {".html", ".htm", ".xhtml"}
-OFFICE = {".docx", ".xlsx", ".pptx"}  # zip of XML — office.py beside this script
+MARKUP = {".html", ".htm", ".xhtml"}  # a plain-text pass here, not office.py
+# Every binary container office.py knows how to open, so a lite run refuses
+# nothing but an image.
+OFFICE = {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
+          ".odt", ".ods", ".odp", ".rtf", ".msg"}
 # A complete sentence each: a refusal is only useful with the fix in it.
 HANDOFF = {
-    ".doc": "it is the legacy binary Word format and nothing here opens it — "
-            "ask for the same file as .docx",
-    ".xls": "it is the legacy binary Excel format and nothing here opens it — "
-            "ask for the same file as .xlsx or .csv",
-    ".ppt": "it is the legacy binary PowerPoint format and nothing here opens "
-            "it — ask for the same file as .pptx",
     ".png": "it is an image — open it with the Read tool and stop at its head",
     ".jpg": "it is an image — open it with the Read tool and stop at its head",
     ".jpeg": "it is an image — open it with the Read tool and stop at its head",

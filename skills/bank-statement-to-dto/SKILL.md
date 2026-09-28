@@ -27,7 +27,9 @@ the actor id from the apply rather than from memory.
 
     /bank-statement-to-dto <file> layer_id <uuid> [account_id <name>] [gateway mw|sim]
 
-- `<file>` — the statement, in the working directory: pdf, xlsx, csv, txt.
+- `<file>` — the statement, in the working directory: pdf, xlsx, xls (converted
+  to xlsx with LibreOffice), docx/doc (a Word-table export, doc converted to
+  docx the same way), csv, txt.
 - `layer_id` — the layer to fill. Ask for it when you do not have it.
 - `account_id` — the account-name category the transactions are recorded
   under. Defaults to `Bank Transaction`. It is a name, not an id.

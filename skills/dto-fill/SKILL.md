@@ -1,6 +1,6 @@
 ---
 name: dto-fill
-description: Read any source the user hands over — pdf, docx, xlsx, csv, md, txt, json, email, screenshot, a saved web page or a pasted URL, one file or several — decide whose facts they are, route them against a Digital Twin layer's own nodes and types, and emit a replayable graph.ops.yaml of the fields to update. Use whenever the user hands over a document, statement, website or export and asks to load, import, extract, fill, map, enrich or route it into the graph / DTO / twin / layer / Simulator, or asks what from a file fits the graph. Triggers on "залей документ в граф", "заполни DTO из файла", "наполни компанию из сайта", "что из этого файла можно внести в граф", "сформируй ops по документу", "import this doc into the twin", "fill the graph from this file", "enrich the company from this source", "make an ops file from this".
+description: Read any source the user hands over — pdf, docx, doc, xlsx, xls, pptx, ppt, odt, ods, odp, rtf, csv, md, txt, json, email, .msg, html, screenshot, a saved web page or a pasted URL, one file or several — decide whose facts they are, route them against a Digital Twin layer's own nodes and types, and emit a replayable graph.ops.yaml of the fields to update. No format is refused: a reader that needs a package not already installed says the exact line to run, and this session may install it. Use whenever the user hands over a document, statement, website or export and asks to load, import, extract, fill, map, enrich or route it into the graph / DTO / twin / layer / Simulator, or asks what from a file fits the graph. Triggers on "залей документ в граф", "заполни DTO из файла", "наполни компанию из сайта", "что из этого файла можно внести в граф", "сформируй ops по документу", "import this doc into the twin", "fill the graph from this file", "enrich the company from this source", "make an ops file from this".
 ---
 
 # dto-fill — sources → graph ops
@@ -72,17 +72,21 @@ and concludes the script was never shipped.
 here: render its pages and read them as pictures — `pdftoppm -png -r 150 -f 1 -l 4 <file> page` — and say in `gaps`
 that the document was transcribed from images.
 
-`.docx .xlsx .pptx` →
+`.docx .xlsx .pptx .doc .xls .ppt .odt .ods .odp .rtf .msg .html` →
 
     python3 <skill-dir>/scripts/office.py <file> [--notes]
 
 Text formats are not the problem — `cat` reads `.json .csv .md .txt .eml` and a saved page, Read opens an image — but
-these three are zip archives of XML, and `cat` on one prints binary. `office.py` prints what a reader would see:
-`.docx` and `.pptx` on the standard library alone, `.xlsx` through `openpyxl`, and a `.docx` with its headers and
-footers around the body, because the letterhead and the registry footer are what Pass 0 judges the issuer by. Slide
-notes come with `--notes`. A legacy `.doc .xls .ppt` has no reader here and the script names the format to ask for
-instead of half-working; a workbook of thousands of rows is a dataset rather than a document, and a statement among
-them belongs to `bank-statement-to-jsonl`. A pasted URL →
+everything in that list is a binary container of some kind, and `cat` on one prints garbage or nothing. `office.py`
+prints what a reader would see: `.docx` and `.pptx` on the standard library alone (they are zip archives of XML), `.xlsx`
+through `openpyxl`, a `.docx` with its headers and footers around the body because the letterhead and the registry
+footer are what Pass 0 judges the issuer by, `.msg` through `extract-msg`, and raw `.html` with the standard library.
+Slide notes come with `--notes`. The legacy binaries `.doc .xls .ppt` and the OpenDocument siblings `.odt .ods .odp`
+and `.rtf` have no reader of their own in this repo — `office.py` converts each with LibreOffice into the OOXML sibling
+it already knows, and if that tool or a pip package a reader needs is missing, the script names the exact install line
+rather than half-working or refusing the format. Run that line and retry; this session is allowed to install what a
+source needs. A workbook of thousands of rows is a dataset rather than a document, and a statement among them belongs
+to `bank-statement-to-jsonl`. A pasted URL →
 
     read_page(url: "<address>")
 

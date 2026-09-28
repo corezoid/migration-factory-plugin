@@ -41,7 +41,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from decimal import Decimal  # noqa: E402
 from statement_lib import Cell, join_spaced_numbers  # noqa: E402
 from statement_lib import (MONEY_TOKEN, _US, _EU, _clean, _HAS_CENTS,  # noqa: E402
-                           StatementError, parse_date, parse_amount, money)
+                           StatementError, parse_date, parse_amount, money,
+                           _xls_to_xlsx, _convert_via_libreoffice,
+                           _docx_table_cells)
 
 # Column names are advisory only -- the parser bands by geometry and never
 # reads a header. This list exists so the probe can put a name beside a
@@ -562,6 +564,12 @@ def probe_tabular(path):
     sys.stdout.write('\nfile      %s   (tabular: bands are COLUMN INDICES, '
                      'use col(i) / cols(a,b))\n\n' % os.path.basename(path))
     ext = os.path.splitext(path)[1].lower()
+    if ext == '.xls':
+        path = _xls_to_xlsx(path)  # LibreOffice, once; raises with the fix if absent
+        ext = '.xlsx'
+    elif ext == '.doc':
+        path = _convert_via_libreoffice(path, 'docx')
+        ext = '.docx'
     rows = []
     if ext in ('.xlsx', '.xlsm'):
         try:
@@ -577,10 +585,11 @@ def probe_tabular(path):
                     break
         finally:
             wb.close()
-    elif ext == '.xls':
-        raise StatementError(
-            'legacy .xls cannot be read here: xlrd is absent and there is no\n'
-            'LibreOffice to convert it. Ask for .xlsx or .csv -- that is the fix.')
+    elif ext == '.docx':
+        for n, cells in enumerate(_docx_table_cells(path)):
+            rows.append(cells)
+            if n >= 30:
+                break
     else:
         import csv as _csv
         with open(path, 'r', encoding='utf-8-sig', newline='') as fh:

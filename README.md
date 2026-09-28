@@ -10,8 +10,10 @@ a quick pass of each, one that does not touch the graph at all, one that drives
 three of the others at once, and the server underneath them:
 
 - **the `dto-fill` skill** — reads whatever the user hands over (pdf, docx,
-  xlsx, screenshot, saved page, email…), decides *whose* facts they are, routes
-  them against the layer's own types, and writes a replayable `graph.ops.yaml`;
+  xlsx, doc, xls, ppt/pptx, odt/ods/odp, rtf, .msg, html, screenshot, saved
+  page, email…) — no format is refused, only some need a package installed
+  first — decides *whose* facts they are, routes them against the layer's own
+  types, and writes a replayable `graph.ops.yaml`;
 - **the `dto-fill-via-web` skill** — the other direction: it reads the *layer*
   first, lists every field still empty, keeps the ones a website could
   plausibly answer, and then reads only the pages that would carry them. It
@@ -260,22 +262,32 @@ different next moves, and only the second licenses writing that down.
 Most of what the user hands over needs nothing: `.txt .md .csv .json .eml`, a
 saved page and the Markdown mf-api renders a website into are text, and `cat`
 is the whole reader. A `.pdf` has `pdftotext -layout` and `pdfplumber` on the
-image. What is left is `.docx`, `.xlsx` and `.pptx` — zip archives of XML that
-`cat` prints as binary — and `skills/dto-fill/scripts/office.py` opens them:
+image. Everything else — `.docx .xlsx .pptx`, the legacy binaries `.doc .xls
+.ppt`, the OpenDocument siblings `.odt .ods .odp`, `.rtf`, Outlook `.msg` and
+raw `.html` — is a binary container of one kind or another that `cat` prints
+as garbage, and `skills/dto-fill/scripts/office.py` opens them:
 
     python3 <skill-dir>/scripts/office.py <file> [--chars N] [--rows N] [--notes]
 
 `.docx` and `.pptx` cost nothing to open — `zipfile` and the standard library
-are the whole dependency, which is the point, because the cc-api image has
-neither `python-docx` nor `python-pptx` and a run that stops to install one is
-a run that stops. `.xlsx` goes through `openpyxl`, which *is* on the image, and
-says the one pip line if it ever is not. A `.docx` comes back with its headers
-and footers around the body, in that order: Pass 0 decides whose facts a
-document holds from the letterhead and the registry footer, and both live in
-their own parts of the archive, so a body-only read would hand the model a
-document with no issuer on it. Slide notes are held back until `--notes` asks
-for them. A legacy `.doc`/`.xls`/`.ppt` has no reader here and the script names
-the format to ask for instead of half-working.
+are the whole dependency. `.xlsx` goes through `openpyxl`. A `.docx` comes back
+with its headers and footers around the body, in that order: Pass 0 decides
+whose facts a document holds from the letterhead and the registry footer, and
+both live in their own parts of the archive, so a body-only read would hand
+the model a document with no issuer on it. Slide notes are held back until
+`--notes` asks for them.
+
+The legacy binaries and the OpenDocument formats have no reader of their own
+here — `office.py` converts each with LibreOffice into the OOXML sibling it
+already knows (`.doc`/`.odt`/`.rtf` → `.docx`, `.ppt`/`.odp` → `.pptx`,
+`.xls`/`.ods` → `.xlsx`) and reads that. `.msg` goes through `extract-msg`, a
+small pure-Python package. Refusing an unfamiliar format used to be the point:
+the cc-api image had none of these tools, and a run that stopped to install
+one over the network was a run that stalled. That constraint no longer holds —
+this plugin's agent may install any package it needs — so every reader that
+needs something not on the standard library exits with the exact install line
+(`apt-get install -y libreoffice`, `python3 -m pip install extract-msg`, …)
+rather than a traceback or a refusal. Run that line and retry.
 
 There is no OCR on the image — no tesseract, no ocrmypdf — so a scanned PDF has
 no text to pull. The way through is to render its pages and read them as
@@ -377,11 +389,13 @@ full skill's to spend. It runs no want list: on an empty layer `holes.py`
 prints seventy blocks, and five nodes is the whole budget anyway.
 
 `top.py` lives in `skills/dto-fill-lite/scripts/`, beside that skill's own copy
-of `schema.py` and of `office.py`; a `.docx`/`.xlsx`/`.pptx` goes through
-`office.py` under the same budget and comes back with the same "left unread"
-line, and what `top.py` refuses by name is an image and a legacy
-`.doc`/`.xls`/`.ppt`. `dto-fill-via-web-lite` carries copies of `page.py` and
-`schema.py` and no `holes.py` — the want list is the thing it does not build.
+of `schema.py` and of `office.py` — kept byte-identical to `dto-fill`'s, so the
+lite skill opens every format the full one does (`.docx/.xlsx/.pptx`, the
+legacy binaries, OpenDocument, `.rtf`, `.msg`) under the same budget and comes
+back with the same "left unread" line. What `top.py` refuses by name is an
+image, which goes to Read instead. `dto-fill-via-web-lite` carries copies of
+`page.py` and `schema.py` and no `holes.py` — the want list is the thing it
+does not build.
 
 ## Install
 
@@ -630,12 +644,15 @@ rows; only the arithmetic catches it.
 | `scripts/statement_lib.py` | `ColumnSpec`, row clustering, banding, both number grammars, streaming JSONL, reconciliation |
 | `scripts/validate.py` | the two gates over a finished JSONL |
 | `templates/parse_pdf.py` | what the agent copies for a PDF |
-| `templates/parse_tabular.py` | the same for xlsx/csv — bands become column indices |
+| `templates/parse_tabular.py` | the same for xlsx/csv/docx — bands become column indices |
 
 Unlike its siblings this skill needs third-party packages: `pdfplumber` for
 PDFs and `openpyxl` for `.xlsx`. Both fail with the install line rather than a
-traceback. Legacy `.xls` has no reader here and the skill says so instead of
-half-working.
+traceback. Legacy `.xls` converts to `.xlsx` with LibreOffice first — the same
+conversion `office.py` uses elsewhere in this plugin — and fails the same way,
+with the install line, when that tool is not on the machine. A `.docx`
+Word-table export reads its `<w:tc>` cells directly, no third-party package
+needed; `.doc` converts to `.docx` with LibreOffice first, same as `.xls`.
 
 
 ## Loading a statement end to end (bank-statement-to-dto)
