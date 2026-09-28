@@ -103,7 +103,7 @@ usually nowhere near any checkout.
 | `SIM_API_KEY` | a workspace API key from account.corezoid.com, scoped to one workspace on one gateway |
 | `DEFAULT_SIM_API_KEY` | the key used when `SIM_API_KEY` is unset — see below |
 | `SIM_WORKSPACE_ID` | the workspace the key is scoped to, read only for a picture upload, which names its workspace in the path. Unset asks the actor's form |
-| `SIM_GROUP_ID` | the group every record `apply_graph` creates is shared to, view and modify on that actor only — a record is off the layer, so the layer's share never reaches it. Optional: unset or not a positive integer shares nothing, said once on stderr |
+| `SIM_GROUP_ID` | the group every record `apply_graph` creates is shared to, view and modify on that actor only — a record is off the layer, so the layer's share never reaches it. Also names and shares the account pairs `post_statement` bootstraps (appended to `account_name`, e.g. `Bank Statement 131107`), so the next session of the same person does not ask for a pair it did not create and get refused 403. Optional: unset or not a positive integer shares nothing, names nothing, said once on stderr |
 | `FIRECRAWL_BASE_URL` | the Firecrawl v2 instance `read_page` renders through. Optional: unset means the shared dev instance, which is the one mf-api renders website sources with |
 | `FIRECRAWL_API_KEY` | that instance's key |
 | `DEFAULT_FIRECRAWL_API_KEY` | the key used when `FIRECRAWL_API_KEY` is unset — same reasoning as the Simulator one, and likewise not filled in by `../.mcp.json` |
@@ -225,13 +225,17 @@ JSON-RPC error — the model is meant to read the message and correct itself.
 
 ## post_statement
 
-Records the JSONL a statement parser produced onto an actor.
+Records a batch of transactions onto an actor, from a JSONL of rows. A parsed
+bank statement is the common case, but nothing here is statement-specific: any
+source that reduces to dated rows of money in and money out posts the same way.
 
-    post_statement(account_id: "Bank Statement", actor_id: "<uuid>", path: "statement.jsonl")
+    post_statement(account_name: "Bank Statement", actor_id: "<uuid>", path: "statement.jsonl")
 
-`account_id` is the account-name category **by name**, not an id: the pair
+`account_name` is the account-name category **by name**, not an id: the pair
 route resolves names, and the workspace's name register has no lookup by id —
-3000 names and only a name query. The name is created if the workspace lacks it.
+3000 names and only a name query. The name is created if the workspace lacks
+it, and the pair it bootstraps is always named with the session's group
+appended (`SIM_GROUP_ID`, when the server was given one) — see above.
 
 **Why both sides get used.** A (name, currency) pair on an actor is two
 accounts with their own ids, one `incomeType: "debit"` and one `"credit"`, and
@@ -273,3 +277,8 @@ with `400 Not unique ref`; that is counted as a duplicate, not a failure.
 Run `dry_run: true` first on anything unfamiliar — it resolves the pairs and
 totals the file per currency without writing, which is the cheapest way to check
 the turnovers against the statement before any of it lands.
+
+**Currency defaults.** A row's own `currency` wins; a row that leaves it empty
+falls back to `currency_name` when the caller passed one — the statement's own
+currency, usually read off its header — and to `XXX` (ISO 4217's "no currency")
+otherwise, so *unknown* stays distinguishable from *assumed*.

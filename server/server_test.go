@@ -204,7 +204,7 @@ func TestEveryToolRequiresItsSubject(t *testing.T) {
 		// answer nothing at all.
 		"find_records":   {"type", "values"},
 		"read_page":      {"url"},
-		"post_statement": {"account_id", "actor_id", "path"},
+		"post_statement": {"account_name", "actor_id", "path"},
 	}
 	for _, tool := range tools {
 		if strings.Join(tool.InputSchema.Required, ",") != strings.Join(want[tool.Name], ",") {

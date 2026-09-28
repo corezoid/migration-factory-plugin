@@ -673,7 +673,7 @@ needed; `.doc` converts to `.docx` with LibreOffice first, same as `.xls`.
 
 ## Loading a statement end to end (bank-statement-to-dto)
 
-    /bank-statement-to-dto <file> layer_id <uuid> [account_id <name>]
+    /bank-statement-to-dto <file> layer_id <uuid> [account_name <name>]
 
 One statement says two kinds of thing and they need two readers. The header
 names a bank, a client and a period — a handful of facts for the layer. The

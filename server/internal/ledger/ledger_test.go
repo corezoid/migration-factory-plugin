@@ -274,6 +274,24 @@ func TestAMissingCurrencyBecomesXXX(t *testing.T) {
 	}
 }
 
+// A caller that already knows the statement's currency — from its header,
+// say — can say so once instead of every row missing it landing as unknown.
+func TestAMissingCurrencyUsesTheDefaultWhenGiven(t *testing.T) {
+	f := newFake(t)
+	p := write(t,
+		`{"transaction_date":"2026-09-21","debit_sum":"1.00","credit_sum":"0.00","description":"a"}`,
+		`{"transaction_date":"2026-09-21","debit_sum":"2.00","credit_sum":"0.00","currency":"usd","description":"b"}`)
+	o := opts(p)
+	o.DefaultCurrency = "uah"
+	res, err := Post(context.Background(), f.client(), o)
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if len(res.Currencies) != 2 || res.Currencies[0].Currency != "UAH" || res.Currencies[1].Currency != "USD" {
+		t.Errorf("currencies %+v, want UAH (from the default, uppercased) and USD (the row's own)", res.Currencies)
+	}
+}
+
 func TestDryRunWritesNothing(t *testing.T) {
 	f := newFake(t)
 	p := write(t,

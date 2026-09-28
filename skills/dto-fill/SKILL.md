@@ -1,12 +1,19 @@
 ---
 name: dto-fill
-description: Read any source the user hands over — pdf, docx, doc, xlsx, xls, pptx, ppt, odt, ods, odp, rtf, csv, md, txt, json, email, .msg, html, screenshot, a saved web page or a pasted URL, one file or several — decide whose facts they are, route them against a Digital Twin layer's own nodes and types, and emit a replayable graph.ops.yaml of the fields to update. No format is refused — a reader that needs a package not already installed says the exact line to run, and this session may install it. Use whenever the user hands over a document, statement, website or export and asks to load, import, extract, fill, map, enrich or route it into the graph / DTO / twin / layer / Simulator, or asks what from a file fits the graph. Triggers on "залей документ в граф", "заполни DTO из файла", "наполни компанию из сайта", "что из этого файла можно внести в граф", "сформируй ops по документу", "import this doc into the twin", "fill the graph from this file", "enrich the company from this source", "make an ops file from this".
+description: Read any source the user hands over — pdf, docx, doc, xlsx, xls, pptx, ppt, odt, ods, odp, rtf, csv, md, txt, json, email, .msg, html, screenshot, a saved web page or a pasted URL, one file or several — work out what kind of document it is first, hand a bank statement straight to bank-statement-to-dto, and otherwise decide whose facts the rest are, route them against a Digital Twin layer's own nodes and types, emit a replayable graph.ops.yaml of the fields to update, AND separately look for any repeating log of dated values against a subject — meter readings, inspection or assessment scores, sensor logs, anything a parser can turn into rows — parse it the same way a bank statement's rows are parsed and post it onto that actor's accounts. No format is refused — a reader that needs a package not already installed says the exact line to run, and this session may install it. Use whenever the user hands over a document, statement, website or export and asks to load, import, extract, fill, map, enrich or route it into the graph / DTO / twin / layer / Simulator, to record readings or a series against an actor, or asks what from a file fits the graph. Triggers on "залей документ в граф", "заполни DTO из файла", "наполни компанию из сайта", "что из этого файла можно внести в граф", "сформируй ops по документу", "занеси показания на актора", "import this doc into the twin", "fill the graph from this file", "enrich the company from this source", "make an ops file from this", "post these readings onto the actor".
 ---
 
 # dto-fill — sources → graph ops
 
 Turn what the user hands over into `graph.ops.yaml` — edits addressed by path — and apply it in the same run. Routing is
 the hard half; the write is the last step, not a question for the user.
+
+This is the universal entry point: mf-api and a manual `/dto-fill` call alike always land here for a document, never
+on a specialised skill directly. What kind of document it turns out to be is this skill's own first decision (Pass 0)
+— a bank statement is handed to `bank-statement-to-dto` from there; everything else is read and routed below. Filling
+the graph is not the only thing a source can be worth: whether it also carries a postable series of dated values
+against a subject — not only a statement's transactions — is a separate question this skill answers on every run
+(Pass 6).
 
 `graph.values.yaml` is a read-only projection. Never edit it; the way back is an ops file.
 
@@ -80,7 +87,7 @@ Text formats are not the problem — `cat` reads `.json .csv .md .txt .eml` and 
 everything in that list is a binary container of some kind, and `cat` on one prints garbage or nothing. `office.py`
 prints what a reader would see: `.docx` and `.pptx` on the standard library alone (they are zip archives of XML), `.xlsx`
 through `openpyxl`, a `.docx` with its headers and footers around the body because the letterhead and the registry
-footer are what Pass 0 judges the issuer by, `.msg` through `extract-msg`, and raw `.html` with the standard library.
+footer are what Pass 1 judges the issuer by, `.msg` through `extract-msg`, and raw `.html` with the standard library.
 Slide notes come with `--notes`. The legacy binaries `.doc .xls .ppt` and the OpenDocument siblings `.odt .ods .odp`
 and `.rtf` have no reader of their own in this repo — `office.py` converts each with LibreOffice into the OOXML sibling
 it already knows, and if that tool or a pip package a reader needs is missing, the script names the exact install line
@@ -109,8 +116,16 @@ Debian image and an `apt-get` line on a Mac are equally unrunnable. The scripts 
 whichever host they are on — this is the rule they follow, and the one to follow when installing something they
 do not know about.
 
-A workbook of thousands of rows is a dataset rather than a document, and a statement among them belongs
-to `bank-statement-to-jsonl`. A pasted URL →
+A workbook of thousands of rows is a dataset rather than a document. A bank statement among them was already sent
+elsewhere in Pass 0, below; anything else that turns out to be mostly structured, repeating rows — a register, a
+ledger, a subscriber list, a CRM export, a large table export of any kind — is not read whole either. Sample one page
+or a handful of rows to work out the column layout the same geometric way `bank-statement-to-jsonl` works out a
+statement's (x-coordinate bands for a PDF, column index for a sheet or CSV), write a short throwaway parser, stream
+it into a working list instead of holding the source in context, and — where the source prints any totals or row
+counts of its own — reconcile against them before trusting a single row. What the parser extracts then goes through
+Pass 2 onward exactly like any other extracted fact; nothing changes because the reading was done by a script.
+`<skill-dir>/../bank-statement-to-jsonl/SKILL.md` is the reference for the technique — the probe, the column
+detection and the reconciliation gates — not for its bank-specific record shape. A pasted URL →
 
     read_page(url: "<address>")
 
@@ -129,7 +144,31 @@ statement > invoice > website) and say so in
 `gaps`. Do not hunt for sources the user did not give you — enrichment is opt-in, and enriched fields carry
 `source: website` and a lower `confidence`.
 
-## Pass 0 — whose facts are these
+## Pass 0 — what kind of document is this
+
+Before the export, before anything else: decide what you are holding. Sample the head the same cheap way the readers
+above already would — one page of `pdftotext`/`pdfplumber`, the head `office.py` prints, the first screen of a text
+file — and answer one question from that alone: is this a bank statement, a ledger of dated rows each debiting or
+crediting an account, however many rows, cover page or not? A header, an account block and one row of the table
+settle it; you do not need to read further to find out.
+
+**A bank statement is not this skill's job, and reading the whole thing here to decide that would be the mistake
+`bank-statement-to-dto` exists to avoid.** That skill reads only the header — never the rows — to place the bank and
+the client on the graph, while a second agent turns the rows into a ledger in parallel; deciding "is this a
+statement" by reading the statement throws away exactly the split it is built to keep.
+
+- **Bank statement** → stop following this file. Read
+  `<skill-dir>/../bank-statement-to-dto/SKILL.md` and follow it instead, from its own Pass 0, carrying this call's
+  `<file>`, `layer_id` and `gateway` straight over — its `account_name` is optional; leave it unset and its default
+  applies. Everything below this point in this file is that skill's from here, not this one's.
+- **Anything else** — a contract, an invoice, an offer or HR order, a register, a report, a website capture already
+  rendered to a file, a CRM export — continue below, in this skill.
+
+This is the only point at which a document's own shape sends the run to a different skill entirely. A large
+structured dataset that is not a bank statement does not leave here — see "The sources" above for how it is read
+without being read whole.
+
+## Pass 1 — whose facts are these
 
 A layer describes **one** company, the twin. `CORPORATION / HOLDING`, `COMPANY`,
 `ORG STRUCTURE`, `FINANCE`, `HRS`, `ADOC` hold its own facts; `CRM`,
@@ -158,22 +197,22 @@ that type has a field for an account — check its schema, do not assume, since 
 do not — and otherwise it is not written at all. Same for people (`HRS` is the twin's own staff) and for sites. When the
 twin flips, re-run the routing — do not patch it.
 
-## Passes 1–4, repeated
+## Passes 2–5, repeated
 
 Carry what each pass decides in your reasoning and report the per-round counts. Do not write a scratch file of the
 facts: within one run you already remember what you settled a minute ago, the ops file is where a decision becomes
 durable, and a document of quotes and values written before the ops file is that file drafted twice.
 
-**1 — extract.** Facts out of the sources, graph unseen: side (`own`/`counterparty`/`neither`), subject, attribute,
+**2 — extract.** Facts out of the sources, graph unseen: side (`own`/`counterparty`/`neither`), subject, attribute,
 value, exact quote. Do not normalize — record what the source says, not what a form wants.
 
-A source built of rows — a statement, a ledger, a register, an export — is not its header. Every distinct **subject**
-the rows name is a fact of pass 1: the counterparties a statement pays, with the account and registration number each
-row carries. A pass that lists the account and stops has read 5% of the file and will converge anyway, because the
-rounds below only ask whether the last round wrote something. Close that hole here: list the subjects first, then their
-attributes.
+A source built of rows — a ledger, a register, an export (parsed in Pass 0's "large dataset" case rather than read
+raw) — is not its header. Every distinct **subject** the rows name is a fact of pass 2: the counterparties a ledger
+pays, with the account and registration number each row carries. A pass that lists the account and stops has read 5%
+of the file and will converge anyway, because the rounds below only ask whether the last round wrote something. Close
+that hole here: list the subjects first, then their attributes.
 
-**2 — type.** Identify candidate types from pass 1, then query only those field definitions — `types.schema.yaml` is ~
+**3 — type.** Identify candidate types from pass 2, then query only those field definitions — `types.schema.yaml` is ~
 100 KB, never read it whole:
 
     python3 <skill-dir>/scripts/schema.py <export>/types.schema.yaml <type1> <type2>
@@ -182,7 +221,7 @@ Avoid `--list` (dumps all 50 types); 2–4 types per call. A field title carries
 (`one of: draft, signed, archived`) — the planner does not enforce them, so a value outside the list is a silent wrong
 write.
 
-**3 — route.** The question is *does this record already exist*, and the canvas cannot answer it. Ask `find_records` —
+**4 — route.** The question is *does this record already exist*, and the canvas cannot answer it. Ask `find_records` —
 one call per type, every subject of that type in `values:`, each given as the identity a register would hold it by. Take
 that from the type: the field its schema marks as an identity key is the value to pass, and where the source does not
 carry it, pass what the source does carry and name that field in `fields:`. Then, per subject, in order:
@@ -232,13 +271,69 @@ how the same company ends up in the register three times: the next document carr
 Carry each settled subject as the op it will become, not as a paragraph about the op it will become — the file is
 written once, at the end, from these decisions (see Output).
 
-**4 — verify.** Challenge every value: is it in the source, or did the field title suggest it? Is it on the side pass 0
+**5 — verify.** Challenge every value: is it in the source, or did the field title suggest it? Is it on the side pass 1
 assigned? Does it obey the enum and format? Anything that fails is dropped, never patched into a guess.
 
 **Repeat** until a round adds no op and changes no value, or after four rounds. Before calling it converged, answer one
 more question: which subjects named in the sources appear in neither the ops file nor `unrouted`? A round that adds
-nothing because pass 1 stopped early looks exactly like a round that adds nothing because the source is exhausted. That
+nothing because pass 2 stopped early looks exactly like a round that adds nothing because the source is exhausted. That
 list is the next round's work.
+
+## Pass 6 — transactions on an actor's accounts, if the source has any
+
+Filling the graph and creating actors is not the whole job when the source itself is, in whole or in part, a
+repeating log of dated values against a subject — not only a bank statement (routed away in Pass 0), but a utility
+bill's meter readings, a series of inspection or assessment scores, a sensor or temperature log, a rent ledger,
+anything that is naturally many rows of *"on this date, this subject had this value"* rather than a handful of facts
+about it. Look for this on every source, not only ones that look financial: a register of dated numeric readings
+against a subject qualifies exactly as a statement does, whatever the values mean.
+
+**Two questions, in order, and either one answered no ends this pass:**
+
+1. **Is there anything here to post at all?** Most sources have nothing — a contract, an invoice header, an HR order
+   name facts, not a series. Skip this pass entirely when the source is not a repeating log of dated values against a
+   subject; do not force a single fact (a one-off invoice total, a single reading) into a posting of one row.
+2. **Can it be parsed?** The rows have to be structured enough to band — a table, a sheet, a delimited export, fixed
+   columns in text. A few numbers scattered through prose is not this; if there is anything worth keeping from those,
+   it is a fact for Pass 2, not a transaction here.
+
+When both answer yes, write a throwaway parser the same way `bank-statement-to-jsonl` writes one for a statement:
+sample a page or a handful of rows to find the column layout (x-coordinate bands for a PDF, column index for a sheet
+or CSV), declare what each column means, stream the whole file into JSONL rather than reading it, and validate against
+whatever the source checks itself with — a printed total, a row count, a checksum, used exactly like a statement's own
+totals. A source with nothing to check against is still read once in full and reported as unverified, never silently
+trusted because nothing contradicted it. **Read `<skill-dir>/../bank-statement-to-jsonl/SKILL.md` before writing the
+parser** — it is the reference for the technique in full (the probe, the column bands, the streaming, the
+reconciliation gates), not only for statements.
+
+**The record shape is the one `post_statement` reads**, whatever the source actually holds:
+
+    {"transaction_date":"2026-04-07","debit_sum":"0.00","credit_sum":"302.50","description":"…"}
+
+A row that is not naturally a debit and a credit — one meter reading, one temperature, one score — still needs one
+side non-zero: put the value on `credit_sum` (or `debit_sum` — pick one side and hold it for the whole file) and leave
+the other `"0.00"`, and say plainly in the report that the number is a reading, not money. `currency` is the source's
+own unit when it names one; when the source is not money at all, leave `currency` off the row and pass nothing for
+`currency_name` either — the posting then falls back to `XXX`, ISO 4217's own "no currency", which says *not a
+currency* honestly rather than inventing one.
+
+Post it once the parser's rows are written and validated:
+
+    post_statement(account_name: "<what this is>", actor_id: "<the subject's actor uuid, from Pass 4>", path: "<the jsonl>")
+
+`account_name` names the kind of reading, not always `"Bank Statement"` — `"Meter Reading"`, `"Temperature Log"`,
+`"Inspection Score"`, whatever the source is actually a series of; it is created on first use, the same as any other
+account-name category. `actor_id` is the uuid the routing above (Pass 4) resolved or created for this subject — never
+one remembered from a search or an earlier run: posting against the wrong actor is the one mistake here nothing
+downstream can undo. **Run it once with `dry_run: true` first** on anything unfamiliar — the same call plus that one
+flag — read back the per-currency (or per-reading) totals it reports, and only then run the call above for real; it is
+idempotent by each row's own ref, so a rerun of the same file posts nothing twice. Pass `timezone` when the source
+names one and its rows carry no offset of their own, the same reason a statement needs it.
+
+Report this pass **separately** from the graph ops — what was found, whether it was parsed and validated, and the
+posting's own counts (written, duplicates, per-side totals) — never folded into "the ops applied" as though a posting
+were the same kind of write. A source with nothing to post here says so in one line; that is the common case, not an
+omission.
 
 ## Rules the planner enforces
 
@@ -309,16 +404,22 @@ re-exports into the same directory.
 It also keeps `result.json` beside the ops file: holes filled, actors updated and records created, with the uuid of
 each. It is cumulative and deduplicated by uuid, so applying the same file again — after a fix, after a partial run —
 does not count a node twice. Its numbers are the totals for the document, not for the last call; quote them as such, and
-do not edit the file by hand.
+do not edit the file by hand. `post_statement` (Pass 6, when the source had anything to post) writes its own half of
+the same `result.json` — the tally is then the whole run, not the graph half alone.
 
 Whoever asked for the run reads that file back by path and cannot list a directory, so leave the export where it
 defaults to — the working directory — unless the user names a directory themselves.
 
 Report: the twin and the evidence for it on the first line, then the applied ops by node with their side, the per-round
 counts, and a bare list of what you did not write — never silently imply the whole source landed. Build that list from
-the subjects the source names, not from the ops that failed: a subject pass 1 never extracted leaves no trace anywhere
+the subjects the source names, not from the ops that failed: a subject pass 2 never extracted leaves no trace anywhere
 else. A wrong write is undone by another ops file.
 
 List any **created records separately**, with their `ref:` and the uuid the apply reports: they are records of their
 form and are on no graph, so a reader who goes looking for them on the canvas will not find them, and a create is the
 one thing another ops file cannot undo.
+
+**Then, separately, Pass 6's own report** — never merged into the ops report above, since a posting is not the same
+kind of write: what was found (or that nothing was), whether it parsed and validated, and the posting's own counts —
+rows written, duplicates skipped, per-side totals — quoted from `post_statement`'s own answer, never from memory of
+what the parser produced.

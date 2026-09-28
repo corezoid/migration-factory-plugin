@@ -24,7 +24,7 @@ const (
 	// connection cannot hold the whole run — the server answers one request at
 	// a time.
 	readPageTimeout = 3 * time.Minute
-	// A statement can hold thousands of rows and each is its own POST.
+	// A source file can hold thousands of rows and each is its own POST.
 	postStatementTimeout = 30 * time.Minute
 )
 
@@ -209,15 +209,18 @@ func toolDefs() []any {
 		},
 		map[string]any{
 			"name": "post_statement",
-			"description": "Record a parsed bank statement on an actor as transactions — the step after " +
-				"a statement has been turned into JSONL and checked against the totals it prints about " +
-				"itself.\n\n" +
+			"description": "Record a batch of transactions on an actor's accounts, from a .jsonl of rows — " +
+				"the step after a source has been turned into that shape and, where the source prints its " +
+				"own totals, checked against them. A parsed bank statement is the common case and the one " +
+				"named below, but nothing here is statement-specific: any source that reduces to dated " +
+				"rows of money in and money out — a POS export, a mobile-money report, a manually typed " +
+				"ledger — posts the same way.\n\n" +
 				"Every row is posted onto the (account-name, currency) pair it belongs to. A pair on an " +
 				"actor is two accounts with their own ids, one debit and one credit, and a transaction " +
 				"carries no direction of its own — the side is the id it lands on. So `debit_sum` goes " +
 				"to the debit side and `credit_sum` to the credit side, the card's credit-minus-debit " +
 				"total is the net movement, and both turnovers stay readable separately, matching the " +
-				"two columns the statement itself prints.\n\n" +
+				"two columns a source like a bank statement prints.\n\n" +
 				"A file may hold several currencies; each gets its own pair, created on first sight and " +
 				"reused for the rest of the run. Creating a pair is also what grants access to it — " +
 				"attaching the account alone does not, and a transaction without that access is refused " +
@@ -225,10 +228,13 @@ func toolDefs() []any {
 				"is then shared with the session's group when the server was given one, because the " +
 				"bootstrap grants the caller and nobody else — without that share the rows land where " +
 				"only this run can see them; a share that failed is reported and the rows stand.\n\n" +
+				"A row whose own `currency` is empty falls back to `currency_name` when the caller passed " +
+				"one — the source's own currency, when it states one up top — and to `XXX` (ISO " +
+				"4217's \"no currency\") otherwise, so *unknown* stays distinguishable from *assumed*.\n\n" +
 				"Each transaction is dated by the row it came from, not by the moment of the import: " +
-				"the statement's `transaction_date` (with `transaction_time` where the statement prints " +
+				"the row's own `transaction_date` (with `transaction_time` where the row prints " +
 				"one) is sent as the transaction's original date. The rows' clock carries no zone, so it " +
-				"is read as UTC unless `timezone` names the bank's. A row whose date is missing or is " +
+				"is read as UTC unless `timezone` names the source's own. A row whose date is missing or is " +
 				"not `yyyy-mm-dd` stops the run — the alternative is a transaction confidently stamped " +
 				"with today, which afterwards is indistinguishable from one that really happened today.\n\n" +
 				"Idempotent by construction: each transaction's ref is derived from the row it came " +
@@ -237,19 +243,21 @@ func toolDefs() []any {
 				"failures.\n\n" +
 				"Run it with `dry_run` first on anything unfamiliar: that resolves the pairs and totals " +
 				"the file per currency without posting, which is the cheapest way to see that the " +
-				"turnovers match the statement before any of it is written.\n\n" +
+				"turnovers match the source before any of it is written.\n\n" +
 				"What it posted is added to the run's result.json beside what apply_graph wrote, so " +
 				"the tally is the whole run rather than its graph half. A dry run records nothing.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"sim": simSchema(),
-					"account_id": map[string]any{
+					"account_name": map[string]any{
 						"type": "string",
 						"description": "The account-name category to record under, BY NAME — e.g. " +
 							"\"Bank Statement\". Created if the workspace does not have it. It is a name " +
 							"and not an id because the pair route resolves names, and the workspace's " +
-							"name register has no lookup by id.",
+							"name register has no lookup by id. The pair it bootstraps is always named " +
+							"with the session's group appended (when the server was given one), so two " +
+							"sessions never fight over the same workspace-level pair.",
 					},
 					"actor_id": map[string]any{
 						"type":        "string",
@@ -260,33 +268,41 @@ func toolDefs() []any {
 						"description": "Path to the .jsonl, one transaction per line, with " +
 							"transaction_date, debit_sum, credit_sum, currency and description.",
 					},
+					"currency_name": map[string]any{
+						"type": "string",
+						"description": "Currency to use for a row whose own `currency` is empty in the " +
+							".jsonl, e.g. \"UAH\". Optional — a row left unnamed this way and with " +
+							"nothing passed here is counted as `XXX` (ISO 4217's \"no currency\") " +
+							"instead, so pass this when the source's currency is known even though " +
+							"some rows do not print it.",
+					},
 					"dir": map[string]any{
 						"type": "string",
 						"description": "Where result.json is kept — the export directory of the same run. " +
 							"Defaults to the directory `path` is in, which is where a run puts both. " +
-							"The posting is recorded there as one entry per statement (the rows have " +
+							"The posting is recorded there as one entry per file (the rows have " +
 							"no uuid to deduplicate by, and the entry is replaced on a re-run, so " +
 							"posting the same file twice does not double the tally).",
 					},
 					"ref_prefix": map[string]any{
 						"type": "string",
 						"description": "Namespaces the idempotency refs (default \"stmt\"). Change it only " +
-							"to post the same statement a second time on purpose — the same file under " +
+							"to post the same file a second time on purpose — the same file under " +
 							"the same prefix is refused as a duplicate, which is the point.",
 					},
 					"timezone": map[string]any{
 						"type": "string",
 						"description": "IANA zone the rows' wall clock is read in, e.g. " +
 							"\"Europe/Kyiv\". Defaults to UTC, which invents nothing but is up to " +
-							"a few hours off the times the statement prints; pass the issuing " +
-							"bank's zone when it is known.",
+							"a few hours off the times the rows print; pass the source's own " +
+							"zone when it is known.",
 					},
 					"dry_run": map[string]any{
 						"type":        "boolean",
 						"description": "Resolve the pairs and total the file per currency, posting nothing.",
 					},
 				},
-				"required": []string{"account_id", "actor_id", "path"},
+				"required": []string{"account_name", "actor_id", "path"},
 			},
 		},
 	}
@@ -766,14 +782,15 @@ func writeWarnings(b *strings.Builder, warnings []string) {
 
 // postStatementArgs is one post_statement call.
 type postStatementArgs struct {
-	AccountID string       `json:"account_id"`
-	ActorID   string       `json:"actor_id"`
-	Path      string       `json:"path"`
-	Dir       string       `json:"dir"`
-	RefPrefix string       `json:"ref_prefix"`
-	Timezone  string       `json:"timezone"`
-	DryRun    bool         `json:"dry_run"`
-	Sim       *simOverride `json:"sim"`
+	AccountName  string       `json:"account_name"`
+	ActorID      string       `json:"actor_id"`
+	Path         string       `json:"path"`
+	Dir          string       `json:"dir"`
+	RefPrefix    string       `json:"ref_prefix"`
+	Timezone     string       `json:"timezone"`
+	CurrencyName string       `json:"currency_name"`
+	DryRun       bool         `json:"dry_run"`
+	Sim          *simOverride `json:"sim"`
 }
 
 // runPostStatement records a parsed statement on an actor.
@@ -784,14 +801,14 @@ func runPostStatement(raw json.RawMessage) (string, error) {
 			return "", fmt.Errorf("bad arguments: %w", err)
 		}
 	}
-	if strings.TrimSpace(args.AccountID) == "" {
-		return "", errors.New("no account name: pass `account_id` with the account-name category to record under, e.g. \"Bank Statement\"")
+	if strings.TrimSpace(args.AccountName) == "" {
+		return "", errors.New("no account name: pass `account_name` with the account-name category to record under, e.g. \"Bank Statement\"")
 	}
 	if strings.TrimSpace(args.ActorID) == "" {
 		return "", errors.New("no actor: pass `actor_id` with the UUID of the actor the accounts belong to")
 	}
 	if strings.TrimSpace(args.Path) == "" {
-		return "", errors.New("no statement: pass `path` with the .jsonl a statement parser produced")
+		return "", errors.New("no input: pass `path` with the .jsonl of transactions to post")
 	}
 	path, err := resolve(args.Path)
 	if err != nil {
@@ -810,14 +827,15 @@ func runPostStatement(raw json.RawMessage) (string, error) {
 
 	start := time.Now()
 	res, err := ledger.Post(ctx, cfg.client(), ledger.Options{
-		AccountName: args.AccountID,
-		ActorID:     args.ActorID,
-		Path:        path,
-		WorkspaceID: cfg.WorkspaceID,
-		GroupID:     cfg.GroupID,
-		RefPrefix:   args.RefPrefix,
-		Timezone:    args.Timezone,
-		DryRun:      args.DryRun,
+		AccountName:     args.AccountName,
+		ActorID:         args.ActorID,
+		Path:            path,
+		WorkspaceID:     cfg.WorkspaceID,
+		GroupID:         cfg.GroupID,
+		RefPrefix:       args.RefPrefix,
+		Timezone:        args.Timezone,
+		DefaultCurrency: args.CurrencyName,
+		DryRun:          args.DryRun,
 	})
 	if err != nil {
 		return "", err
@@ -860,10 +878,10 @@ func recordStatement(args postStatementArgs, path string, res *ledger.Result) st
 		return "note: the posting is not in result.json — " + err.Error()
 	}
 	rec := graph.StatementRecord{
-		Ref:          graph.StatementRef(args.RefPrefix, args.ActorID, args.AccountID, path),
+		Ref:          graph.StatementRef(args.RefPrefix, args.ActorID, args.AccountName, path),
 		File:         filepath.Base(path),
 		ActorID:      args.ActorID,
-		Account:      args.AccountID,
+		Account:      args.AccountName,
 		Transactions: res.Posted + res.Duplicate,
 		Failed:       res.Skipped,
 	}
@@ -885,7 +903,7 @@ func renderPostStatement(res *ledger.Result, args postStatementArgs, start time.
 	if args.DryRun {
 		what = "would post"
 	}
-	fmt.Fprintf(&b, "%s: %d rows, %s %d transactions", args.AccountID, res.Records, what, res.Posted)
+	fmt.Fprintf(&b, "%s: %d rows, %s %d transactions", args.AccountName, res.Records, what, res.Posted)
 	if res.Duplicate > 0 {
 		fmt.Fprintf(&b, ", %d already there", res.Duplicate)
 	}
@@ -902,11 +920,11 @@ func renderPostStatement(res *ledger.Result, args postStatementArgs, start time.
 	}
 	if len(res.Currencies) > 1 {
 		b.WriteString("\nMore than one currency: each has its own pair, and only the\n" +
-			"per-currency turnovers above are comparable with the statement.\n")
+			"per-currency turnovers above are comparable with the source.\n")
 	}
 	if args.DryRun {
 		b.WriteString("\nNothing was written. Check these turnovers against the totals the\n" +
-			"statement prints about itself, then run again without dry_run.\n")
+			"source prints about itself, if it prints any, then run again without dry_run.\n")
 	}
 	writeWarnings(&b, res.Warnings)
 	return b.String()

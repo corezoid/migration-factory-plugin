@@ -1,7 +1,11 @@
-// Package ledger posts a parsed bank statement onto an actor as transactions.
+// Package ledger posts a batch of transactions onto an actor's accounts. The
+// rows usually come from a parsed bank statement, but nothing here is
+// statement-specific: anything that reduces to dated rows of money in and
+// money out — a POS export, a mobile-money report, a manually typed ledger —
+// posts the same way.
 //
-// The input is the JSONL a statement parser produces — one object per
-// transaction, carrying a date, a currency, and the two turnover columns:
+// The input is a JSONL of that shape — one object per transaction, carrying a
+// date, a currency, and the two turnover columns:
 //
 //	{"transaction_date":"2026-09-21","transaction_time":"08:20:02",
 //	 "debit_sum":"236.10","credit_sum":"0.00","currency":"UAH",
@@ -14,7 +18,7 @@
 // id, and the card's own credit-minus-debit total is then the net movement,
 // with both turnovers still readable separately. Nothing is signed to achieve
 // that, which is what keeps these numbers comparable with the ones the
-// statement prints about itself.
+// source prints about itself, when it prints any.
 //
 // A file may hold more than one currency. Each gets its own pair, resolved on
 // first sight and remembered for the rest of the run — `POST /accounts/pair`
@@ -23,7 +27,7 @@
 //
 // Each row is posted with its own date. The platform stamps a transaction with
 // the moment of the call and keeps the real one in `originalDate`, so a run
-// that does not send it produces a statement every row of which happened on
+// that does not send it produces a ledger every row of which happened on
 // import day — which is what the whole file exists to say otherwise.
 package ledger
 
@@ -73,7 +77,12 @@ type Options struct {
 	GroupID     int    // Single Account group each pair is named after and shared to; 0 does neither
 	RefPrefix   string // namespaces the idempotency refs; defaults to "stmt"
 	Timezone    string // IANA zone the rows' wall clock is read in; defaults to UTC
-	DryRun      bool   // resolve and count, post nothing
+	// DefaultCurrency is used for a row whose own `currency` field is empty,
+	// instead of XXX (ISO 4217's "no currency"). Pass it when the caller
+	// already knows the statement's currency — from its header, say — and an
+	// empty row should be counted as that currency rather than as unknown.
+	DefaultCurrency string
+	DryRun          bool // resolve and count, post nothing
 }
 
 // Result is what the run did.
@@ -111,7 +120,7 @@ type sides struct {
 // worse than one that says which rows it lost.
 func Post(ctx context.Context, sim *simulator.Client, opts Options) (*Result, error) {
 	if strings.TrimSpace(opts.AccountName) == "" {
-		return nil, fmt.Errorf("no account name: pass `account_id` with the account-name category to record under")
+		return nil, fmt.Errorf("no account name: pass `account_name` with the account-name category to record under")
 	}
 	if strings.TrimSpace(opts.ActorID) == "" {
 		return nil, fmt.Errorf("no actor: pass `actor_id` with the actor UUID the accounts belong to")
@@ -150,6 +159,9 @@ func Post(ctx context.Context, sim *simulator.Client, opts Options) (*Result, er
 		res.Records++
 
 		cur := strings.ToUpper(strings.TrimSpace(r.Currency))
+		if cur == "" {
+			cur = strings.ToUpper(strings.TrimSpace(opts.DefaultCurrency))
+		}
 		if cur == "" {
 			cur = "XXX"
 		}
@@ -373,7 +385,7 @@ func location(name string) (*time.Location, error) {
 	}
 	loc, err := time.LoadLocation(name)
 	if err != nil {
-		return nil, fmt.Errorf("unknown timezone %q: pass an IANA name such as Europe/Kyiv, or leave it out to read the statement's clock as UTC", name)
+		return nil, fmt.Errorf("unknown timezone %q: pass an IANA name such as Europe/Kyiv, or leave it out to read the rows' clock as UTC", name)
 	}
 	return loc, nil
 }

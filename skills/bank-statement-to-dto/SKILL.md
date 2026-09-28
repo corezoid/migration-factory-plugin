@@ -25,14 +25,17 @@ the actor id from the apply rather than from memory.
 
 ## The call
 
-    /bank-statement-to-dto <file> layer_id <uuid> [account_id <name>] [gateway mw|sim]
+    /bank-statement-to-dto <file> layer_id <uuid> [account_name <name>] [gateway mw|sim]
 
 - `<file>` — the statement, in the working directory: pdf, xlsx, xls (converted
   to xlsx with LibreOffice), docx/doc (a Word-table export, doc converted to
   docx the same way), csv, txt.
 - `layer_id` — the layer to fill. Ask for it when you do not have it.
-- `account_id` — the account-name category the transactions are recorded
-  under. Defaults to `Bank Transaction`. It is a name, not an id.
+- `account_name` — the account-name category the transactions are recorded
+  under. Defaults to `Bank Transaction`. It is a name, not an id, and always
+  gets the session's group appended when `post_statement` bootstraps its pair
+  (`SIM_GROUP_ID`, when the server was given one) — that is what keeps two
+  sessions' pairs apart on a workspace-level route.
 - `gateway` — which Simulator deployment the layer lives on, `mw` or `sim`.
 
 ## Pass 0 — start the parser before anything else
@@ -195,9 +198,10 @@ and everything before it is the other agent's working out.
 
 Then, once:
 
-    post_statement(account_id: "Bank Transaction",
+    post_statement(account_name: "Bank Transaction",
                    actor_id: "<the client's actor uuid from the apply>",
-                   path: "bank_statement_transactions.jsonl")
+                   path: "bank_statement_transactions.jsonl",
+                   currency_name: "<the header's currency, if pass 1 read one>")
 
 It resolves one (account-name, currency) pair per currency in the file,
 attaches both sides to the client, and posts each row's `debit_sum` to the
@@ -205,6 +209,11 @@ debit side and `credit_sum` to the credit side. Each transaction is dated by
 its own row, not by today. Refs are derived from the rows, so a repeated run
 posts nothing twice — which also means a run interrupted here can simply be
 run again.
+
+**Pass `currency_name` when pass 1 read a currency off the header.** A row
+whose own `currency` is empty falls back to it instead of the parser's `XXX`
+placeholder — the header is a fact about the whole statement, and a row that
+left the column blank is not thereby a row in an unknown currency.
 
 **Pass `timezone` when the statement's country is known** — e.g.
 `timezone: "Europe/Kyiv"` for a Ukrainian bank. The rows print a wall clock
