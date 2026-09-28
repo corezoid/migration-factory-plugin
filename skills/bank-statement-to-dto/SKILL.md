@@ -180,15 +180,27 @@ stranger's accounts — the one error in this run that no later ops file undoes.
 
 ## Pass 5 — collect the parser, then post
 
-Now, and not before. Wait for the sentinel in one blocking call, with a long
-tool timeout — each call waits, it does not sample:
+Now, and not before. Start this once, in the background, then wait on it —
+it does not sample, it blocks until one of the two files exists or 30 minutes
+pass:
 
     i=0; while [ $i -lt 90 ] && [ ! -f parser.done ] && [ ! -f parser.failed ]; \
       do sleep 20; i=$((i+1)); done; cat parser.done parser.failed 2>/dev/null
 
-Thirty minutes a call. Neither file there when it returns? Run the same line
-again. Do not reach for the transcript in between: the sentinel is the answer,
-and everything before it is the other agent's working out.
+**A single wait call is capped well under that 30 minutes** (measured
+2026-09-28: a 1800s wait was clamped to 180s by the sandbox, the command itself
+having already been forced to the background because 1800s exceeds its 600s
+foreground cap). That clamp is a property of the wait call, not of the loop:
+the loop above is still running in the background when the wait returns, and
+neither file existing yet means keep waiting, not that the 30 minutes are up.
+
+**Wait on it again, on the same background process — do not re-run the
+command.** The tool that backgrounded it says so itself ("Do NOT re-run it"):
+a second copy would race the first one for the same two files. Only start a
+fresh background run if a `process_manage(action: "list")` (or `"poll"`) shows
+the original process is gone. Do not reach for the transcript in between: the
+sentinel is the answer, and everything before it is the other agent's working
+out.
 
 | it says | do |
 |---|---|
