@@ -39,7 +39,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from decimal import Decimal  # noqa: E402
-from statement_lib import Cell, join_spaced_numbers  # noqa: E402
+from statement_lib import Cell, join_spaced_numbers, pip_line  # noqa: E402
 from statement_lib import (MONEY_TOKEN, _US, _EU, _clean, _HAS_CENTS,  # noqa: E402
                            StatementError, parse_date, parse_amount, money,
                            _xls_to_xlsx, _convert_via_libreoffice,
@@ -221,8 +221,8 @@ def main(argv):
     try:
         import pdfplumber
     except ImportError:
-        raise StatementError('probe: pdfplumber is required.\n'
-                             '    python3 -m pip install pdfplumber')
+        raise StatementError('probe: pdfplumber is required.\n    '
+                             + pip_line('pdfplumber'))
 
     with pdfplumber.open(path) as pdf:
         n = len(pdf.pages)
@@ -575,8 +575,8 @@ def probe_tabular(path):
         try:
             import openpyxl
         except ImportError:
-            raise StatementError('probe: openpyxl is required for .xlsx\n'
-                                 '    python3 -m pip install openpyxl')
+            raise StatementError('probe: openpyxl is required for .xlsx\n    '
+                                 + pip_line('openpyxl'))
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         try:
             for n, vals in enumerate(wb.worksheets[0].iter_rows(values_only=True)):

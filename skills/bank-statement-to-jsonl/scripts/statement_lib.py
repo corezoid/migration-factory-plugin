@@ -69,11 +69,62 @@ class AmountFormatError(StatementError):
     pass
 
 
+def persistent_site():
+    """The directory on this host where an installed package survives a restart.
+
+    The runtimes this skill runs in rebuild their filesystem from the image
+    every time the process comes back, so a package installed into the
+    container is gone by the next run and the run after it pays to install it
+    again. A host that has solved that says so in PYTHONPATH: a writable
+    directory named there is a volume outliving the container. Nothing
+    writable there is an ordinary machine, where the plain pip line holds.
+    """
+    for entry in os.environ.get('PYTHONPATH', '').split(os.pathsep):
+        entry = entry.strip()
+        if entry and os.path.isdir(entry) and os.access(entry, os.W_OK):
+            return entry
+    return ''
+
+
+def pip_line(package):
+    """The command that installs `package` where it is still there next run."""
+    site = persistent_site()
+    if not site:
+        return 'python3 -m pip install %s' % package
+    # uv rather than pip: a gateway image that keeps its packages on a volume
+    # ships uv and no pip at all, and --target is what puts the package on the
+    # volume instead of inside the container.
+    return 'uv pip install --target %s %s' % (site, package)
+
+
+def tool_hint(package):
+    """What to say when a system tool — not a python package — is missing.
+
+    `apt-get install` is the wrong advice on a host with such a volume twice
+    over: the run is not root there, and even as root the tool would be gone
+    at the next restart. A host like that documents where its tools go, and
+    pointing at that beats printing a command that cannot work.
+    """
+    site = persistent_site()
+    if not site:
+        return ('    apt-get install -y %s   (Debian/Ubuntu)\n'
+                '    brew install --cask %s  (macOS)' % (package, package))
+    root = os.path.dirname(site.rstrip(os.sep))
+    notes = os.path.join(root, 'DEPENDENCIES.md')
+    if os.path.isfile(notes):
+        return ('    anything installed into this container is gone at the next\n'
+                '    restart, so tools live on the volume instead — %s\n'
+                '    says how one is put there' % notes)
+    return ('    anything installed into this container is gone at the next\n'
+            '    restart: unpack it under %s and put a wrapper on PATH, the way\n'
+            '    the packages already there were' % root)
+
+
 def _need(module, why):
     """Fail with the install line rather than a traceback 300 pages in."""
     raise StatementError(
-        "statement_lib: %s is required %s.\n"
-        "    python3 -m pip install %s" % (module, why, module))
+        "statement_lib: %s is required %s.\n    %s"
+        % (module, why, pip_line(module)))
 
 
 _CONVERT_CACHE = {}  # (original path, target ext) -> converted path, this run only
@@ -93,9 +144,7 @@ def _convert_via_libreoffice(path, target_ext):
     if not soffice:
         raise StatementError(
             "statement_lib: %s needs LibreOffice to convert — install it and "
-            "retry\n"
-            "    apt-get install -y libreoffice   (Debian/Ubuntu)\n"
-            "    brew install --cask libreoffice  (macOS)" % os.path.basename(path))
+            "retry\n%s" % (os.path.basename(path), tool_hint('libreoffice')))
     tmp = tempfile.mkdtemp(prefix='lo-convert-')
     run = subprocess.run(
         [soffice, '--headless', '--norestore', '--convert-to', target_ext,

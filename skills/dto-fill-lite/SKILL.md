@@ -66,9 +66,15 @@ run says so.
 the legacy binaries `.doc .xls .ppt`, the OpenDocument formats `.odt .ods
 .odp`, `.rtf` and Outlook `.msg` — through `office.py` beside it and under this
 same budget. A reader that needs a package or LibreOffice not already present
-says the exact install line; install it and run `top.py` again. The one thing
-this refuses by name is an image, which goes to Read instead. Either way, take
-the head of it and come straight back.
+says the exact install line; install it and run `top.py` again — this session
+has permission to install whatever a source needs, and a lite run is not the
+exception. That line names the place as well as the package: where `PYTHONPATH`
+points at a writable directory (`/opt/data/py-deps` on the Hermes gateway) the
+install goes on the volume, because the container is rebuilt from its image at
+every restart and anything put inside it is gone by the next run; where it does
+not, `pip install` as always. The one thing this refuses by name is an image,
+which goes to Read instead. Either way, take the head of it and come straight
+back.
 
 ## 3 — whose facts are these
 

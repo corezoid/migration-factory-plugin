@@ -28,6 +28,10 @@ a run that stalls on a network install is worse than one that names the
 format and stops. That constraint is gone: install what a reader asks for and
 retry. Every reader that needs something not on the standard library says the
 exact line to run rather than raising a traceback partway through a document.
+The line also says *where* the install goes, which is not the same answer on
+every host: a runtime rebuilt from its image at each restart keeps its packages
+on a volume instead, and a package put beside them rather than into the
+container is one the next run does not pay for again.
 
 The last line says how much was left unread — a run that saw two sheets of
 nine has to be able to say so rather than imply the workbook was thin.
@@ -65,6 +69,61 @@ SLIDE = re.compile(r"^ppt/slides/slide(\d+)\.xml$")
 NOTES = re.compile(r"^ppt/notesSlides/notesSlide(\d+)\.xml$")
 HEADER = re.compile(r"^word/header(\d*)\.xml$")
 FOOTER = re.compile(r"^word/footer(\d*)\.xml$")
+
+
+# --------------------------------------------------------------------------
+# where an install goes
+# --------------------------------------------------------------------------
+
+def persistent_site():
+    """The directory on this host where an installed package survives a restart.
+
+    The runtimes this plugin runs in rebuild their filesystem from the image
+    every time the process comes back, so a package installed into the
+    container is gone by the next run and the run after it pays to install it
+    again. A host that has solved that says so in PYTHONPATH: a writable
+    directory named there is a volume outliving the container. Nothing
+    writable there is an ordinary machine, where the plain pip line holds.
+    """
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        entry = entry.strip()
+        if entry and os.path.isdir(entry) and os.access(entry, os.W_OK):
+            return entry
+    return ""
+
+
+def pip_line(package):
+    """The command that installs `package` where it is still there next run."""
+    site = persistent_site()
+    if not site:
+        return "python3 -m pip install %s" % package
+    # uv rather than pip: a gateway image that keeps its packages on a volume
+    # ships uv and no pip at all, and --target is what puts the package on the
+    # volume instead of inside the container.
+    return "uv pip install --target %s %s" % (site, package)
+
+
+def tool_hint(package):
+    """What to say when a system tool — not a python package — is missing.
+
+    `apt-get install` is the wrong advice on a host with such a volume twice
+    over: the run is not root there, and even as root the tool would be gone
+    at the next restart. A host like that documents where its tools go, and
+    pointing at that beats printing a command that cannot work.
+    """
+    site = persistent_site()
+    if not site:
+        return ("    apt-get install -y %s   (Debian/Ubuntu)\n"
+                "    brew install --cask %s  (macOS)" % (package, package))
+    root = os.path.dirname(site.rstrip(os.sep))
+    notes = os.path.join(root, "DEPENDENCIES.md")
+    if os.path.isfile(notes):
+        return ("    anything installed into this container is gone at the next\n"
+                "    restart, so tools live on the volume instead — %s\n"
+                "    says how one is put there" % notes)
+    return ("    anything installed into this container is gone at the next\n"
+            "    restart: unpack it under %s and put a wrapper on PATH, the way\n"
+            "    the packages already there were" % root)
 
 
 def text_of(xml, breaks):
@@ -144,8 +203,8 @@ def read_xlsx(path, opts):
     try:
         import openpyxl
     except ImportError:
-        sys.exit("office.py: openpyxl is required to read .xlsx\n"
-                 "    python3 -m pip install openpyxl")
+        sys.exit("office.py: openpyxl is required to read .xlsx\n    "
+                 + pip_line("openpyxl"))
     # openpyxl warns on stderr about drawing and formatting extensions it drops.
     # None of that is text, and a warning printed beside the sheet reads as if
     # something went wrong with the values.
@@ -191,8 +250,8 @@ def read_msg(path, opts):
     try:
         import extract_msg
     except ImportError:
-        sys.exit("office.py: extract-msg is required to read .msg\n"
-                 "    python3 -m pip install extract-msg")
+        sys.exit("office.py: extract-msg is required to read .msg\n    "
+                 + pip_line("extract-msg"))
     msg = extract_msg.Message(path)
     try:
         head = "\n".join(
@@ -250,10 +309,8 @@ def via_libreoffice(path, opts, target_ext, reader):
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if not soffice:
         sys.exit(
-            "office.py: %s needs LibreOffice to convert — install it and retry\n"
-            "    apt-get install -y libreoffice   (Debian/Ubuntu)\n"
-            "    brew install --cask libreoffice  (macOS)"
-            % os.path.basename(path))
+            "office.py: %s needs LibreOffice to convert — install it and retry\n%s"
+            % (os.path.basename(path), tool_hint("libreoffice")))
     with tempfile.TemporaryDirectory() as tmp:
         run = subprocess.run(
             [soffice, "--headless", "--norestore", "--convert-to", target_ext,

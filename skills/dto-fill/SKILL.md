@@ -85,7 +85,28 @@ Slide notes come with `--notes`. The legacy binaries `.doc .xls .ppt` and the Op
 and `.rtf` have no reader of their own in this repo — `office.py` converts each with LibreOffice into the OOXML sibling
 it already knows, and if that tool or a pip package a reader needs is missing, the script names the exact install line
 rather than half-working or refusing the format. Run that line and retry; this session is allowed to install what a
-source needs. A workbook of thousands of rows is a dataset rather than a document, and a statement among them belongs
+source needs.
+
+**A format `office.py` does not recognise at all is not a dead end either.** Nothing here is refused for lack of a
+library — this session has permission to install any package or system tool a source needs, whatever the format.
+Run `file <path>` to see what the bytes actually are, find what reads that format, install it (see the rule below)
+and read the file directly; a short one-off script is a normal answer here, not a failure. Only report a source as
+unreadable after actually trying and having it still not open — never because the extension was simply not one this
+repo already had a name for.
+
+**Where an install goes.** `PYTHONPATH` answers that, and it is worth a look before installing anything.
+A runtime that names a writable directory there — `/opt/data/py-deps` on the Hermes gateway — is one whose
+container is rebuilt from its image at every restart: a package installed into the container is gone by the next
+run, so it goes on the volume instead (`uv pip install --target /opt/data/py-deps <package>` — `uv`, because that
+image ships no pip at all). A system tool goes there too, unpacked under `/opt/data` with a wrapper on
+`/opt/data/bin`, which is already on PATH; `apt-get install` is not the answer there twice over, since the run is
+not root and the package would not survive the restart anyway. `/opt/data/DEPENDENCIES.md` says how the tools
+already on that volume were put there. Nothing writable on `PYTHONPATH` means an ordinary machine, and there it
+is `pip install` and `apt-get install` as always. The scripts beside this file already print the right line for
+whichever host they are on — this is the rule they follow, and the one to follow when installing something they
+do not know about.
+
+A workbook of thousands of rows is a dataset rather than a document, and a statement among them belongs
 to `bank-statement-to-jsonl`. A pasted URL →
 
     read_page(url: "<address>")

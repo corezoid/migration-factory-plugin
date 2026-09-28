@@ -286,15 +286,27 @@ the cc-api image had none of these tools, and a run that stopped to install
 one over the network was a run that stalled. That constraint no longer holds —
 this plugin's agent may install any package it needs — so every reader that
 needs something not on the standard library exits with the exact install line
-(`apt-get install -y libreoffice`, `python3 -m pip install extract-msg`, …)
 rather than a traceback or a refusal. Run that line and retry.
 
-There is no OCR on the image — no tesseract, no ocrmypdf — so a scanned PDF has
-no text to pull. The way through is to render its pages and read them as
-pictures (`pdftoppm -png -r 150 <file> page`), which recovers the words but not
-their coordinates: enough for `dto-fill`, never enough for the banding that
-`bank-statement-to-jsonl` is built on, which is why that skill asks for a text
-layer instead.
+The line names a place as well as a package, because the two runtimes answer
+differently. Where `PYTHONPATH` points at a writable directory the container is
+rebuilt from its image at every restart and anything installed inside it is gone
+by the next run, so the install goes on that volume instead: `uv pip install
+--target /opt/data/py-deps <package>` on the Hermes gateway (that image ships uv
+and no pip), and a system tool unpacked under `/opt/data` with a wrapper on
+`/opt/data/bin` — `apt-get` is no use there, the run is not root. Anywhere else
+it is `python3 -m pip install` and `apt-get install` as always. `pip_line()` and
+`tool_hint()` in `office.py` and `statement_lib.py` are that rule in code, so a
+reader's message is already right for the host it printed on.
+
+A scanned PDF has no text layer to pull, and that one is not a missing-package
+case: `tesseract` or `ocrmypdf` can be installed like anything else, and it
+still does not give `bank-statement-to-jsonl` what it runs on. OCR returns words
+without trustworthy coordinates, and coordinates are the whole premise of the
+banding — so the way through is to render the pages and read them as pictures
+(`pdftoppm -png -r 150 <file> page`), which is transcription rather than
+parsing: enough for `dto-fill`, never enough for a statement, which is why that
+skill asks for a text layer or a `.csv`/`.xlsx` instead.
 
 ## Filling from the web (`dto-fill-via-web`)
 

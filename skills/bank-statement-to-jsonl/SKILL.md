@@ -129,8 +129,20 @@ Take it when you see:
 | two rounds of spec edits that have not converged | the shape is being forced, and a third round is fitting, not fixing |
 
 Inside `extract()` you are free: pdfplumber, PyMuPDF, an HTML parser, regex
-over a text dump, another library entirely. **Two things survive the rewrite**,
-and they are what makes any of it trustworthy:
+over a text dump, another library entirely — none of it has to already be on
+the machine. This session has permission to install whatever the format
+needs; a source in a shape nothing here has a reader for is a reason to
+install one, never a reason to stop. Where it goes: `PYTHONPATH` naming a
+writable directory (`/opt/data/py-deps` on the Hermes gateway) means the
+container is rebuilt from its image at every restart, so the install goes on
+that volume — `uv pip install --target /opt/data/py-deps <package>`, and a
+system tool unpacked under `/opt/data` with a wrapper on `/opt/data/bin`
+rather than `apt-get`, which the run has no root for; `/opt/data/DEPENDENCIES.md`
+says how the tools already there were put there. No such directory means an
+ordinary machine, and there it is `pip install`/`apt-get install` as always.
+
+**Two things survive the rewrite**, and they are what makes any of it
+trustworthy:
 
 - **the record** — the same five keys, the same string amounts, one side
   non-zero;
@@ -433,19 +445,24 @@ the same statement with a text layer and this run re-runs on it" is a next
 step.
 
 - **A PDF with no text layer.** The probe returns almost no words: it is a
-  scan, so there is neither text nor geometry to band, and there is no OCR on
-  this image — no tesseract, no ocrmypdf. Ask for the same statement with a
-  text layer, or as `.csv`/`.xlsx`: one request to the bank turns a dead end
-  into a re-run. Reading the pages as pictures (`pdftoppm -png -r 150 <file>
-  page`, then Read) recovers the words but not their x-coordinates, so it is
-  transcription and not parsing — worth it for a handful of pages, and only
-  with the totals gate carrying the whole proof.
+  scan, so there is neither text nor geometry to band. This is not a missing-
+  library case — `tesseract`/`ocrmypdf` can be installed, but OCR output has
+  no trustworthy coordinates, and coordinates are the whole premise `ColumnSpec`
+  runs on (see the `from_scratch.py` table above). Installing an OCR engine
+  does not fix that; it only changes what you would trust the result with. For
+  more than a handful of pages, ask for the same statement with a text layer,
+  or as `.csv`/`.xlsx`: one request to the bank turns a dead end into a re-run.
+  For a handful, either OCR it (`tesseract`, installed if it is not there) or
+  read the pages as pictures (`pdftoppm -png -r 150 <file> page`, then Read) —
+  either way it is transcription and not parsing, and the totals gate has to
+  carry the whole proof since there is no column geometry backing it up.
 - **A password-protected PDF.** Ask for the password. Do not try any.
 - **A legacy `.xls` with no LibreOffice on the machine.** `probe.py` and
   `statement_lib.py` convert `.xls` to `.xlsx` with LibreOffice before reading
-  it — install it and retry (`apt-get install -y libreoffice` or `brew install
-  --cask libreoffice`); only a machine with neither Python's `.xls` reader nor
-  that tool is a genuine dead end.
+  it — install it and retry; the script prints the line for the host it is on,
+  which is `apt-get`/`brew` on an ordinary machine and an unpack onto the
+  volume where one is in use. Only a machine with neither Python's
+  `.xls` reader nor that tool is a genuine dead end.
 - **One unsigned amount column with no direction token.** Show the caller two
   rows you cannot tell apart and ask which is which.
 - **Two currencies or two accounts in one file.** Summing across them is
