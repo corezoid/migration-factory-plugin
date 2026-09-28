@@ -297,8 +297,9 @@ and no pip), and a system tool unpacked under `/opt/data` with a wrapper on
 `/opt/data/bin`: `apt-get install` needs a root the run does not have there,
 while `apt-get download` and `dpkg-deb -x` do not. Anywhere else it is
 `python3 -m pip install` and the manager that machine actually has — `apt-get`,
-`dnf`, `apk`, `pacman`, `zypper` or `brew`, whichever is on PATH, with `sudo`
-only when there is a `sudo` to call. `pip_line()` and `tool_hint()` in
+`dnf`, `apk`, `pacman`, `zypper` or `brew`, whichever is on PATH, as the
+manager's own invocation — whether it needs elevating is the machine's
+business, not the reader's guess. `pip_line()` and `tool_hint()` in
 `office.py` and `statement_lib.py` are that rule in code, so a reader's message
 is already right for the host it printed on.
 

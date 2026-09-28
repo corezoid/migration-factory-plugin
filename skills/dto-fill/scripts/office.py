@@ -150,13 +150,15 @@ def tool_hint(package, binary=None):
         return "\n".join(lines)
     for manager, template in MANAGERS:
         if shutil.which(manager):
-            line = template % package
-            # sudo only when there is one: a container image that ships no
-            # sudo would get a line that fails on its first word.
-            if (manager != "brew" and shutil.which("sudo")
-                    and hasattr(os, "geteuid") and os.geteuid() != 0):
-                line = "sudo " + line
-            return "    " + line
+            line = "    " + template % package
+            # No elevation prefix is printed: which one a machine takes is its
+            # own business, and a wrong first word is a line that fails before
+            # it starts. Whether the line needs an administrator at all is the
+            # part this can check, so that is what it says.
+            if (manager != "brew" and hasattr(os, "geteuid")
+                    and os.geteuid() != 0):
+                line += "\n    (this run is not root, so that line needs an administrator)"
+            return line
     return ("    install %s the way this machine installs packages — no package\n"
             "    manager this knows about is on PATH" % (binary or package))
 
