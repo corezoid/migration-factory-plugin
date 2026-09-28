@@ -99,10 +99,13 @@ A runtime that names a writable directory there — `/opt/data/py-deps` on the H
 container is rebuilt from its image at every restart: a package installed into the container is gone by the next
 run, so it goes on the volume instead (`uv pip install --target /opt/data/py-deps <package>` — `uv`, because that
 image ships no pip at all). A system tool goes there too, unpacked under `/opt/data` with a wrapper on
-`/opt/data/bin`, which is already on PATH; `apt-get install` is not the answer there twice over, since the run is
-not root and the package would not survive the restart anyway. `/opt/data/DEPENDENCIES.md` says how the tools
-already on that volume were put there. Nothing writable on `PYTHONPATH` means an ordinary machine, and there it
-is `pip install` and `apt-get install` as always. The scripts beside this file already print the right line for
+`/opt/data/bin`, which is already on PATH. `apt-get install` is not the answer there twice over — the run is not
+root, and the package would not survive the restart anyway — but `apt-get download` and `dpkg-deb -x` both work
+unprivileged, so unpacking one is something this run can do by itself; only a whole missing dependency tree needs
+an operator. `/opt/data/DEPENDENCIES.md` says how the tools already on that volume were put there. Nothing
+writable on `PYTHONPATH` means an ordinary machine, and there it is `pip install` and whichever package manager
+that machine actually has — the scripts name the one they find rather than guessing, since a `brew` line on a
+Debian image and an `apt-get` line on a Mac are equally unrunnable. The scripts beside this file already print the right line for
 whichever host they are on — this is the rule they follow, and the one to follow when installing something they
 do not know about.
 

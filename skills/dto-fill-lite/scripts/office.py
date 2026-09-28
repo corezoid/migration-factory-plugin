@@ -103,27 +103,62 @@ def pip_line(package):
     return "uv pip install --target %s %s" % (site, package)
 
 
-def tool_hint(package):
+# The install line is only useful if the manager is the one this machine has.
+# Ordered by how specific the match is, not by preference: a machine with two
+# of these is rare, and the first hit is the one whose packages are on PATH.
+MANAGERS = (
+    ("apt-get", "apt-get install -y %s"),
+    ("dnf", "dnf install -y %s"),
+    ("yum", "yum install -y %s"),
+    ("apk", "apk add %s"),
+    ("pacman", "pacman -S --noconfirm %s"),
+    ("zypper", "zypper install -y %s"),
+    # `brew install <name>` resolves a cask too, so one form covers both a CLI
+    # tool and an app like LibreOffice; `--cask` would be wrong for the former.
+    ("brew", "brew install %s"),
+)
+
+
+def tool_hint(package, binary=None):
     """What to say when a system tool — not a python package — is missing.
 
-    `apt-get install` is the wrong advice on a host with such a volume twice
-    over: the run is not root there, and even as root the tool would be gone
-    at the next restart. A host like that documents where its tools go, and
-    pointing at that beats printing a command that cannot work.
+    Two things make a single hardcoded line wrong here. A host that keeps its
+    packages on a volume rebuilds the container from its image at every
+    restart, so a tool installed into it is gone by the next run — and the run
+    is not root there anyway, which rules out the package manager outright.
+    And on an ordinary machine the manager is whichever one is actually
+    installed: naming `apt-get` on a Mac, or `brew` on the Debian image that
+    has neither brew nor a root shell, is a line nobody can run.
     """
     site = persistent_site()
-    if not site:
-        return ("    apt-get install -y %s   (Debian/Ubuntu)\n"
-                "    brew install --cask %s  (macOS)" % (package, package))
-    root = os.path.dirname(site.rstrip(os.sep))
-    notes = os.path.join(root, "DEPENDENCIES.md")
-    if os.path.isfile(notes):
-        return ("    anything installed into this container is gone at the next\n"
-                "    restart, so tools live on the volume instead — %s\n"
-                "    says how one is put there" % notes)
-    return ("    anything installed into this container is gone at the next\n"
-            "    restart: unpack it under %s and put a wrapper on PATH, the way\n"
-            "    the packages already there were" % root)
+    if site:
+        root = os.path.dirname(site.rstrip(os.sep))
+        lines = [
+            "    nothing installed into this container survives the next restart,",
+            "    and this run is not root, so the tool is unpacked onto the volume",
+            "    instead — `apt-get download` and `dpkg-deb -x` both work unprivileged:",
+            "      cd %s && apt-get download %s && dpkg-deb -x %s_*.deb %s"
+            % (root, package, package, os.path.join(root, package)),
+            "      then a wrapper on %s that points LD_LIBRARY_PATH at its lib dir"
+            % os.path.join(root, "bin"),
+            "    (a package whose whole dependency tree is missing needs root to",
+            "    download in one go — that is an operator's `kubectl exec`, not this run)",
+        ]
+        notes = os.path.join(root, "DEPENDENCIES.md")
+        if os.path.isfile(notes):
+            lines.append("    %s shows how the tools already there were put there" % notes)
+        return "\n".join(lines)
+    for manager, template in MANAGERS:
+        if shutil.which(manager):
+            line = template % package
+            # sudo only when there is one: a container image that ships no
+            # sudo would get a line that fails on its first word.
+            if (manager != "brew" and shutil.which("sudo")
+                    and hasattr(os, "geteuid") and os.geteuid() != 0):
+                line = "sudo " + line
+            return "    " + line
+    return ("    install %s the way this machine installs packages — no package\n"
+            "    manager this knows about is on PATH" % (binary or package))
 
 
 def text_of(xml, breaks):

@@ -294,10 +294,13 @@ rebuilt from its image at every restart and anything installed inside it is gone
 by the next run, so the install goes on that volume instead: `uv pip install
 --target /opt/data/py-deps <package>` on the Hermes gateway (that image ships uv
 and no pip), and a system tool unpacked under `/opt/data` with a wrapper on
-`/opt/data/bin` — `apt-get` is no use there, the run is not root. Anywhere else
-it is `python3 -m pip install` and `apt-get install` as always. `pip_line()` and
-`tool_hint()` in `office.py` and `statement_lib.py` are that rule in code, so a
-reader's message is already right for the host it printed on.
+`/opt/data/bin`: `apt-get install` needs a root the run does not have there,
+while `apt-get download` and `dpkg-deb -x` do not. Anywhere else it is
+`python3 -m pip install` and the manager that machine actually has — `apt-get`,
+`dnf`, `apk`, `pacman`, `zypper` or `brew`, whichever is on PATH, with `sudo`
+only when there is a `sudo` to call. `pip_line()` and `tool_hint()` in
+`office.py` and `statement_lib.py` are that rule in code, so a reader's message
+is already right for the host it printed on.
 
 A scanned PDF has no text layer to pull, and that one is not a missing-package
 case: `tesseract` or `ocrmypdf` can be installed like anything else, and it

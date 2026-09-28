@@ -136,10 +136,11 @@ install one, never a reason to stop. Where it goes: `PYTHONPATH` naming a
 writable directory (`/opt/data/py-deps` on the Hermes gateway) means the
 container is rebuilt from its image at every restart, so the install goes on
 that volume — `uv pip install --target /opt/data/py-deps <package>`, and a
-system tool unpacked under `/opt/data` with a wrapper on `/opt/data/bin`
-rather than `apt-get`, which the run has no root for; `/opt/data/DEPENDENCIES.md`
-says how the tools already there were put there. No such directory means an
-ordinary machine, and there it is `pip install`/`apt-get install` as always.
+system tool unpacked under `/opt/data` with a wrapper on `/opt/data/bin` —
+`apt-get install` has no root there, but `apt-get download` and `dpkg-deb -x`
+do not need one; `/opt/data/DEPENDENCIES.md` says how the tools already there
+were put there. No such directory means an ordinary machine, and there it is
+`pip install` and whatever package manager that machine has.
 
 **Two things survive the rewrite**, and they are what makes any of it
 trustworthy:
@@ -460,7 +461,7 @@ step.
 - **A legacy `.xls` with no LibreOffice on the machine.** `probe.py` and
   `statement_lib.py` convert `.xls` to `.xlsx` with LibreOffice before reading
   it — install it and retry; the script prints the line for the host it is on,
-  which is `apt-get`/`brew` on an ordinary machine and an unpack onto the
+  naming the package manager that host actually has, or an unpack onto the
   volume where one is in use. Only a machine with neither Python's
   `.xls` reader nor that tool is a genuine dead end.
 - **One unsigned amount column with no direction token.** Show the caller two

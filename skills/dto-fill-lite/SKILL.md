@@ -72,7 +72,7 @@ exception. That line names the place as well as the package: where `PYTHONPATH`
 points at a writable directory (`/opt/data/py-deps` on the Hermes gateway) the
 install goes on the volume, because the container is rebuilt from its image at
 every restart and anything put inside it is gone by the next run; where it does
-not, `pip install` as always. The one thing this refuses by name is an image,
+not, `pip install` and whichever package manager that machine has. The one thing this refuses by name is an image,
 which goes to Read instead. Either way, take the head of it and come straight
 back.
 
