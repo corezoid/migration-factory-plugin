@@ -43,7 +43,7 @@ DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 TIME = re.compile(r'^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$')
 AMT = re.compile(r'^\d+\.\d{2}$')
 KEYS = {'transaction_date', 'transaction_time', 'debit_sum', 'credit_sum',
-        'currency', 'description'}
+        'currency', 'description', 'uniq_actor_field_value'}
 CUR = re.compile(r'^[A-Z]{3}$')
 
 TOTAL_LINE = re.compile(
@@ -106,6 +106,10 @@ def gate_one(rows, show):
           'want a three-letter ISO code; XXX when the statement never named one')
     check('description', [(n, r) for n, r in rows
                           if not str(r.get('description', '')).strip()])
+    check('uniq_actor_field_value', [(n, r) for n, r in rows
+                                     if 'uniq_actor_field_value' in r
+                                     and not str(r['uniq_actor_field_value']).strip()],
+          'present but empty -- omit the key entirely on a single-actor file')
 
     by_cur = {}
     for _n, r in rows:
@@ -132,6 +136,17 @@ def gate_one(rows, show):
                                          money(Decimal(str(max(vals))))))
     ntime = sum(1 for _, r in rows if 'transaction_time' in r)
     w('  %-18s %d rows carry one\n' % ('transaction_time', ntime))
+
+    actor_vals = [str(r['uniq_actor_field_value']) for _, r in rows
+                  if str(r.get('uniq_actor_field_value', '')).strip()]
+    if actor_vals:
+        distinct = len(set(actor_vals))
+        w('  %-18s %d rows carry one, %d distinct value%s\n'
+          % ('actor key', len(actor_vals), distinct, '' if distinct == 1 else 's'))
+        if distinct == len(actor_vals):
+            w('  %-18s every value is unique -- if actors are meant to share one\n'
+              '%seach, the field is probably wrong (or this really is one row per\n'
+              '%sactor)\n' % ('  (unique)', ' ' * 22, ' ' * 22))
 
     if show:
         w('\nFIRST %d ROWS -- read these against the statement, not against\n'

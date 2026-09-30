@@ -232,6 +232,17 @@ left the column blank is not thereby a row in an unknown currency.
 with no offset; without this it is read as UTC, which is hours off the times
 the statement shows.
 
+**If the parser reported "many actors" instead of one**, this skill's premise
+— one header, one client, one `actor_id` — does not hold, and the call above
+is the wrong one: pass `actor_field` (the field name) and `actor_type` (its
+type slug) instead of `actor_id`, and `post_statement` resolves each row's own
+actor from its own `uniq_actor_field_value` against the client register. That
+resolution is a Simulator lookup per distinct value, not a single client found
+against the register the way pass 3 does it, so it does not benefit from this
+skill's client-resolution passes at all — it is closer to a batch of small
+`bank-statement-to-dto` runs than to one. Report this rather than forcing a
+single `actor_id` onto a file that named several.
+
 Read its per-currency turnovers back against the totals the parser reported. If
 the parser reconciled and these match it, the ledger on the client is the
 statement. If they differ, say so plainly rather than averaging them in prose:

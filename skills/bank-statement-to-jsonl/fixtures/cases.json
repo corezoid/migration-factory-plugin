@@ -46,6 +46,12 @@
       "shape": "one unsigned column with the side in a marker column"
     },
     {
+      "name": "demo many-actor",
+      "file": "fixtures/many_actor.csv",
+      "spec": "parse_demo_many_actor.py",
+      "shape": "a many-actor file: an actor band on its own column, so every row carries uniq_actor_field_value and two rows share one actor"
+    },
+    {
       "name": "Unicredit (from scratch)",
       "file": "Unicredit.pdf",
       "script": "parse_scratch_unicredit.py",

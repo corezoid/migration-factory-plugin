@@ -37,6 +37,13 @@ SPEC = ColumnSpec(
     currency_default = None,    # 'RON' -- the usual case: the header says it once
     # currency  = (x0, x1),     # only when a column names YOUR amount's currency
     #                           # (a card statement's Валюта names the *other* one)
+
+    # --- which actor the row belongs to. Only when this file mixes rows for
+    #     more than one actor (see SKILL.md, "One actor, or many") -- an
+    #     ordinary single-actor statement leaves this unset entirely.
+    # actor     = (x0, x1),     # an IBAN, card number or tax id column ->
+    #                           # every row's uniq_actor_field_value
+
     date_re     = r'(\d{2}/\d{2}/\d{4})',
     date_order  = 'dmy',
     date_carry  = True,         # statements that print the date once per day

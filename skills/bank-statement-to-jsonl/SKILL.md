@@ -53,6 +53,7 @@ One JSON object per line, and nothing else in the file:
 | `transaction_time` | **only** when that row prints a time; key omitted otherwise |
 | `debit_sum` / `credit_sum` | strings, dot decimal, exactly 2 places, unsigned, `"0.00"` on the empty side |
 | `description` | this row's text with its continuation lines joined in |
+| `uniq_actor_field_value` | **only** when the file holds rows for more than one actor — see below; key omitted for a single-actor file |
 
 Amounts are strings so nothing downstream re-floats them, and `Decimal`
 inside so that summing forty thousand rows is exact.
@@ -63,6 +64,69 @@ document's print stamp in the page header — BT's `Tiparit: 2026-05-15
 11:55:22`, Unicredit's `14:28:26`. A "find a time on the page" rule stamps
 every transaction with the moment somebody hit print. All three emit no
 `transaction_time` at all, and that is the correct answer.
+
+## One actor, or many
+
+Not every source is one account's history. A card-processor export, a
+merchant settlement file, an accountant's combined ledger — anything that
+reduces to "dated rows of money in and money out" can just as easily hold
+the transactions of fifty counterparties in one file as the transactions of
+one. Decide which this is before Pass 3 writes the record shape, because the
+answer changes what a row carries.
+
+**The tell is a column that changes *who*, not just how much.** A
+single-actor statement names its one owner once, in the account header, and
+never again — every row is that same account's history, and the header
+already said whose. A many-actor file instead prints, per row or per block,
+a value that picks out a *different* counterparty from row to row: a card
+number, an IBAN, a client's tax id (ИНН), an email, a phone number, a
+merchant code — whatever the source itself uses so a reconciler can tell
+"this row" from "that row" apart. If that value repeats across the file for
+the *same* person and changes for a *different* one, this is a many-actor
+source, and every row needs to carry it.
+
+**Do not guess from the file's name or from "this looks like a report".** A
+`transactions.csv` with one account number printed once in a header is
+single-actor regardless of how businesslike the filename sounds; a
+`statement.pdf` that prints a different IBAN in the description of every
+third row is many-actor regardless of how personal it looks. Check the
+column, not the label — the same geometric test Pass 1 already runs to find
+the transaction table tells you this too: a value that stacks in a column
+and *varies row to row* is an actor key; a value that is the same on every
+row belongs in the report you'd otherwise write once, not in every record.
+
+**When it is many, add `uniq_actor_field_value` to every row** — the value
+of whichever field distinguishes that row's actor from the rest, taken
+verbatim from the source: a card PAN or its masked form, an IBAN, an ИНН/tax
+id, an email, an account number. Pick the field the source itself uses to
+keep its counterparties apart, not one you invent — an invented key (a
+running counter, a hash of the description) sorts identically-named
+counterparties together and gives the downstream tool nothing it can filter
+Simulator actors on. Normalize obvious formatting noise the same way on every
+row — spaces in an IBAN, dashes in a card number — so the same actor always
+produces the same string; a card printed once masked and once in full is
+still two keys for one actor if you don't.
+
+**When it is one, leave the key out entirely.** Do not stamp every row with
+the account's own IBAN or owner id "just in case" — a key that is identical
+on every row of a single-actor file says nothing an omitted key doesn't
+already say, and it tells the posting tool downstream to go looking for more
+than one actor where there is only one.
+
+**Report which case it was.** The final report (Output, below) states
+"single actor" or "many actors, keyed on `<field>`, `<N>` distinct values" on
+the same line that states the record shape. This is exactly the kind of
+mistake the totals gate cannot catch: every row still reconciles to the cent
+whether the key is right, wrong, or missing, because reconciliation sums
+money, not identities — a wrong key silently attributes real turnover to the
+wrong counterparty while the grand total stays perfect.
+
+**This is what `post_statement` reads on the other end.** Passed `actor_field`
+(the field name) and `actor_type` (its type), it resolves each row's own actor
+from its own `uniq_actor_field_value` instead of every row sharing one
+`actor_id` — but that is the next tool's job, not this skill's; this skill's
+job ends at writing the value correctly, once per row, or not writing it at
+all.
 
 ## Pass 0 — take your own copy of the toolkit
 
@@ -145,8 +209,8 @@ were put there. No such directory means an ordinary machine, and there it is
 **Two things survive the rewrite**, and they are what makes any of it
 trustworthy:
 
-- **the record** — the same five keys, the same string amounts, one side
-  non-zero;
+- **the record** — the same keys (`uniq_actor_field_value` too, on a
+  many-actor source), the same string amounts, one side non-zero;
 - **the second gate** — `validate.py` reads the JSONL and nothing else, so it
   checks a hand-written parser exactly as it checks a spec-driven one. Writing
   the parser yourself does not remove the need to prove it; it is the case
@@ -491,23 +555,27 @@ Then report, in this order:
 
 1. **the file and the shape it turned out to be**, with the map on one line:
    `two columns, debit x1≈474.5, credit x1≈573.2, us numbers, %d/%m/%Y`;
-2. **the pages you probed**, by number, and why those — never "I examined the
+2. **one actor or many** — "single actor" or "many actors, keyed on `<field>`,
+   `<N>` distinct values" — the same fact Pass 1's geometric test settled, not
+   a re-guess at report time;
+3. **the pages you probed**, by number, and why those — never "I examined the
    document";
-3. **the counts**: transactions written, pages read, rows skipped as noise with
+4. **the counts**: transactions written, pages read, rows skipped as noise with
    the patterns that skipped them, orphan rows, unclaimed numbers;
-4. **the reconciliation with both numbers side by side** — what the statement
+5. **the reconciliation with both numbers side by side** — what the statement
    prints and what the JSONL sums to, per side, plus row counts wherever the
    statement prints them. Say "reconciles to the cent" only when it does, and
    never round anything to make it true;
-5. **the first three rows verbatim**, each against the line on the sampled page
+6. **the first three rows verbatim**, each against the line on the sampled page
    it came from — the only place a reader can check the column map by eye;
-6. **what is not in the file**: rows deliberately dropped that a reader might
+7. **what is not in the file**: rows deliberately dropped that a reader might
    expect (opening and closing balances, daily turnover), and any key the
-   statement cannot fill — `transaction_time` where no time is printed — in one
-   line, not once per row;
-7. **the paths**, and the line saying the parser takes this bank's next
+   statement cannot fill — `transaction_time` where no time is printed,
+   `uniq_actor_field_value` on a single-actor file — in one line, not once per
+   row;
+8. **the paths**, and the line saying the parser takes this bank's next
    statement without another probe;
-8. **whether you changed `statement_lib.py`**, and if so what and why — a
+9. **whether you changed `statement_lib.py`**, and if so what and why — a
    changed library is the part a reader would never think to check, and if the
    change looks general it is worth promoting into the skill behind
    `regress.py`.

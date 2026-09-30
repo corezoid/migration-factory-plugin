@@ -1,0 +1,5 @@
+Date,Ref,Actor,Narrative,Debit,Credit
+01/04/2026,R1,RO111,Card payment,29.00,
+04/04/2026,R2,RO222,Salary,,2500.00
+07/04/2026,R3,RO111,Transfer out,150.50,
+Total,,,,179.50,2500.00

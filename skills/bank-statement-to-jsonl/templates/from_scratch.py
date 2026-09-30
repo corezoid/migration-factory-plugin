@@ -50,6 +50,9 @@ def extract(path):
             credit_sum       = '0.00',
             currency         = 'RON',      # 'XXX' if the statement never names one
             description      = 'Pachet IZI ... REF: 547IZ...',
+            # uniq_actor_field_value=... -- ONLY when this source mixes rows
+            # for more than one actor (see SKILL.md, "One actor, or many").
+            # Leave it unset (the default) for an ordinary single-actor file.
         )
 
     Rules that are not negotiable, because they are what the record means:
@@ -61,6 +64,9 @@ def extract(path):
         one -- and it must describe THIS amount, not a second amount printed
         beside it in the merchant's currency
       - description carries this row's continuation lines, joined
+      - uniq_actor_field_value is set on EVERY row or NONE of them -- whatever
+        the source itself uses to tell its actors apart (an IBAN, a card
+        number, a tax id), taken verbatim, never invented
     """
     raise NotImplementedError('write extract() for this statement')
 

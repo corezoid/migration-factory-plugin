@@ -27,7 +27,9 @@ The output record, one JSON object per line:
      "transaction_time": "hh:mm:ss",        # only when the row prints one
      "debit_sum":  "0.00",                  # string, dot decimal, 2dp, unsigned
      "credit_sum": "302.50",
-     "description": "..."}                  # continuation lines joined in
+     "description": "...",                  # continuation lines joined in
+     "uniq_actor_field_value": "..."}        # only when spec.actor is set --
+                                              # a many-actor file; see spec.actor
 
 Amounts are strings so that nothing downstream re-floats them, and Decimal
 throughout so that summing 40,000 rows is exact.
@@ -414,6 +416,15 @@ class ColumnSpec:
     currency_default: Optional[str] = None
     currency_re: str = r'^[A-Za-z]{3}$|^[\u20ac\u0024\u00a3\u20b4\u20bd]$'
 
+    # --- which actor the row belongs to (many-actor files only) -------------
+    # Unset for a single-actor file -- most of them. Some sources mix several
+    # actors' rows in one file and print, per row, whatever value tells them
+    # apart: a card number, an IBAN, a tax id. Band it here and every row
+    # carries `uniq_actor_field_value`; a continuation line backfills it the
+    # same way a continuation backfills `currency`, since the value can print
+    # once per transaction rather than on every line of it.
+    actor: Optional[Band] = None
+
     # --- where the text is --------------------------------------------------
     description: Band = (0.0, 1e9)
     date: Optional[Band] = None
@@ -516,6 +527,7 @@ class Transaction:
     description: str
     currency: str = UNKNOWN_CURRENCY
     transaction_time: Optional[str] = None
+    uniq_actor_field_value: Optional[str] = None
     page: int = 0
 
     def to_json(self):
@@ -526,6 +538,8 @@ class Transaction:
         o['credit_sum'] = self.credit_sum
         o['currency'] = self.currency
         o['description'] = self.description
+        if self.uniq_actor_field_value:
+            o['uniq_actor_field_value'] = self.uniq_actor_field_value
         return json.dumps(o, ensure_ascii=False)
 
 
@@ -728,6 +742,7 @@ class Counts:
     markers_read: int = 0
     unknown_currency: int = 0
     currencies: Dict = field(default_factory=dict)
+    actor_values: Dict = field(default_factory=dict)
     unclaimed_samples: List = field(default_factory=list)
     debit_total: Decimal = ZERO
     credit_total: Decimal = ZERO
@@ -907,6 +922,10 @@ def transactions(spec, path, pages=None, counts=None, on_page=None):
                     cur = SYMBOL_ISO.get(t, t.upper())
                     break
 
+        act = None
+        if spec.actor is not None:
+            act = ' '.join(c.text for c in row.cells if _in(spec.actor, c.x1)).strip() or None
+
         has_amount = deb is not None or cred is not None
         dtok = None
         for c in row.cells:
@@ -972,12 +991,15 @@ def transactions(spec, path, pages=None, counts=None, on_page=None):
                 transaction_date=dtok,
                 debit_sum=money(deb) if deb is not None else '0.00',
                 credit_sum=money(cred) if cred is not None else '0.00',
-                description=desc, transaction_time=tm, page=row.page)
+                description=desc, transaction_time=tm,
+                uniq_actor_field_value=act, page=row.page)
             counts.transactions += 1
             counts.currencies[open_txn.currency] = \
                 counts.currencies.get(open_txn.currency, 0) + 1
             if open_txn.currency == UNKNOWN_CURRENCY:
                 counts.unknown_currency += 1
+            if act:
+                counts.actor_values[act] = counts.actor_values.get(act, 0) + 1
             counts.per_page[row.page] = counts.per_page.get(row.page, 0) + 1
             counts.debit_total += (deb or ZERO)
             counts.credit_total += (cred or ZERO)
@@ -991,6 +1013,11 @@ def transactions(spec, path, pages=None, counts=None, on_page=None):
                             if cur_re.match(t):
                                 open_txn.currency = SYMBOL_ISO.get(t, t.upper())
                                 break
+                if spec.actor is not None and not open_txn.uniq_actor_field_value:
+                    v = ' '.join(c.text for c in row.cells if _in(spec.actor, c.x1)).strip()
+                    if v:
+                        open_txn.uniq_actor_field_value = v
+                        counts.actor_values[v] = counts.actor_values.get(v, 0) + 1
                 if time_re is not None and not open_txn.transaction_time:
                     m = time_re.search(text)
                     if m:
@@ -1126,6 +1153,13 @@ def report(counts, spec, src, out, stream=sys.stderr):
     if len(counts.currencies) > 1:
         w('  !! more than one currency: the totals gate is only meaningful per\n'
           '     currency, so reconcile each one separately.\n')
+    if spec.actor is not None:
+        w('  actor key            %8d distinct values (uniq_actor_field_value)\n'
+          % len(counts.actor_values))
+        if counts.actor_values and len(counts.actor_values) == counts.transactions:
+            w('  !! every transaction has its own distinct value -- if this is meant\n'
+              '     to be an actor key shared across several rows per actor, the band\n'
+              '     is probably wrong or too wide.\n')
     w('  debit total  %16s\n' % money(counts.debit_total))
     w('  credit total %16s\n' % money(counts.credit_total))
 
