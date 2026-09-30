@@ -1,6 +1,6 @@
 ---
 name: dto-fill
-description: Read any source the user hands over — pdf, docx, doc, xlsx, xls, pptx, ppt, odt, ods, odp, rtf, csv, md, txt, json, email, .msg, html, screenshot, a saved web page or a pasted URL, one file or several — work out what kind of document it is first, hand a bank statement straight to bank-statement-to-dto, and otherwise decide whose facts the rest are, route them against a Digital Twin layer's own nodes and types, emit a replayable graph.ops.yaml of the fields to update, AND separately look for any repeating log of dated values against a subject — meter readings, inspection or assessment scores, sensor logs, anything a parser can turn into rows — parse it the same way a bank statement's rows are parsed and post it onto that actor's accounts. No format is refused — a reader that needs a package not already installed says the exact line to run, and this session may install it. Use whenever the user hands over a document, statement, website or export and asks to load, import, extract, fill, map, enrich or route it into the graph / DTO / twin / layer / Simulator, to record readings or a series against an actor, or asks what from a file fits the graph. Triggers on "залей документ в граф", "заполни DTO из файла", "наполни компанию из сайта", "что из этого файла можно внести в граф", "сформируй ops по документу", "занеси показания на актора", "import this doc into the twin", "fill the graph from this file", "enrich the company from this source", "make an ops file from this", "post these readings onto the actor".
+description: Read any source the user hands over — pdf, docx, doc, xlsx, xls, pptx, ppt, odt, ods, odp, rtf, csv, md, txt, json, email, .msg, html, screenshot, a saved web page or a pasted URL, a GitHub/git repo URL, a prompt naming several sources of different kinds at once, one file or several — work out what kind of document it is first, hand a bank statement straight to bank-statement-to-dto, hand too many files at once to dto-fill-loop, and otherwise decide whose facts the rest are, route them against a Digital Twin layer's own nodes and types, emit a replayable graph.ops.yaml of the fields to update, AND separately look for any repeating log of dated values against a subject — meter readings, inspection or assessment scores, sensor logs, anything a parser can turn into rows — parse it the same way a bank statement's rows are parsed and post it onto that actor's accounts. No format is refused — a reader that needs a package not already installed says the exact line to run, and this session may install it. Use whenever the user hands over a document, statement, website, repo or export and asks to load, import, extract, fill, map, enrich or route it into the graph / DTO / twin / layer / Simulator, to record readings or a series against an actor, or asks what from a file fits the graph. Triggers on "залей документ в граф", "заполни DTO из файла", "наполни компанию из сайта", "что из этого файла можно внести в граф", "сформируй ops по документу", "занеси показания на актора", "стяни репозиторий и разбери", "import this doc into the twin", "fill the graph from this file", "enrich the company from this source", "make an ops file from this", "post these readings onto the actor", "pull this repo and go through its files".
 ---
 
 # dto-fill — sources → graph ops
@@ -94,12 +94,13 @@ it already knows, and if that tool or a pip package a reader needs is missing, t
 rather than half-working or refusing the format. Run that line and retry; this session is allowed to install what a
 source needs.
 
-**A format `office.py` does not recognise at all is not a dead end either.** Nothing here is refused for lack of a
-library — this session has permission to install any package or system tool a source needs, whatever the format.
-Run `file <path>` to see what the bytes actually are, find what reads that format, install it (see the rule below)
-and read the file directly; a short one-off script is a normal answer here, not a failure. Only report a source as
-unreadable after actually trying and having it still not open — never because the extension was simply not one this
-repo already had a name for.
+**Nothing here is refused for lack of a tool.** This session has permission to install any package or system tool
+this run needs — a library to read an unfamiliar format, `git` itself to clone a repo, whatever else a step below
+calls for and does not find already here. A format `office.py` does not recognise at all is not a dead end: run
+`file <path>` to see what the bytes actually are, find what reads that format, install it (see "Where an install
+goes" just below) and read the file directly; a short one-off script is a normal answer here, not a failure. Only
+report a source as unreadable, or a tool as unavailable, after actually trying and having it still not work — never
+because the extension or the tool was simply not one this repo already had a name for.
 
 **Where an install goes.** `PYTHONPATH` answers that, and it is worth a look before installing anything.
 A runtime that names a writable directory there — `/opt/data/py-deps` on the Hermes gateway — is one whose
@@ -139,6 +140,22 @@ A page that comes back refused is not a page that said nothing. The message says
 either way what goes in `gaps` is that the page was unreadable, never that the site is silent on what it might have
 held.
 
+**A repo URL is cloned, not read as a page.** `github.com/<owner>/<repo>`, the same shape on gitlab.com or
+bitbucket.org, with `.git` — clone the whole repository (`--depth 1`, no history needed) into a subdirectory of
+the working directory — `git` missing is the same case "Where an install goes" already covers, not a reason to
+stop. Read what comes out of the clone the same way anything else handed over is read:
+`office.py`, `pdftotext`, `cat`, whichever the file's own extension calls for. Skip `.git/` itself and a
+project's own tooling artifacts (`node_modules`, `vendor`, `dist`, `build`, `.venv`) — dependencies and build
+output are never documents, whatever else a repo might also hold. A clone that fails (private, bad URL, network)
+is said in the report — not read as the source having nothing to say. Everything that comes out of it continues
+below, in this same pass, the same way several files handed over directly already would.
+
+**A prompt can be the source list itself** — several addresses of different kinds, pasted together in one
+message rather than named one call at a time. Work out each address's own kind before reading any of it: a repo
+URL clones (above), a plain address is `read_page`'d, a direct download link is fetched and then read by
+whatever format it turns out to be — never assume every link in one message is the same kind because the first
+one was.
+
 Several thin sources are normal. When two disagree, prefer the one closer to the registry (registry > contract >
 statement > invoice > website) and say so in
 `gaps`. Do not hunt for sources the user did not give you — enrichment is opt-in, and enriched fields carry
@@ -148,23 +165,25 @@ statement > invoice > website) and say so in
 
 Before the export, before anything else: decide what you are holding. Sample the head the same cheap way the readers
 above already would — one page of `pdftotext`/`pdfplumber`, the head `office.py` prints, the first screen of a text
-file — and answer one question from that alone: is this a bank statement, a ledger of dated rows each debiting or
-crediting an account, however many rows, cover page or not? A header, an account block and one row of the table
-settle it; you do not need to read further to find out.
+file — and answer one question from that alone, per source when there are several (a cloned repo, a multi-link
+prompt): is this a bank statement, a ledger of dated rows each debiting or crediting an account, however many rows,
+cover page or not? A header, an account block and one row of the table settle it; you do not need to read further to
+find out.
 
 **A bank statement is not this skill's job, and reading the whole thing here to decide that would be the mistake
 `bank-statement-to-dto` exists to avoid.** That skill reads only the header — never the rows — to place the bank and
 the client on the graph, while a second agent turns the rows into a ledger in parallel; deciding "is this a
 statement" by reading the statement throws away exactly the split it is built to keep.
 
-- **Bank statement** → stop following this file. Read
-  `<skill-dir>/../bank-statement-to-dto/SKILL.md` and follow it instead, from its own Pass 0, carrying this call's
-  `<file>`, `layer_id` and `gateway` straight over — its `account_name` is optional; leave it unset and its default
-  applies. Everything below this point in this file is that skill's from here, not this one's.
+- **Bank statement** → hand that source to `<skill-dir>/../bank-statement-to-dto/SKILL.md`, from its own Pass 0,
+  carrying `layer_id` and `gateway` straight over — its `account_name` is optional; leave it unset and its default
+  applies. When several sources arrived together and only some of them are statements, this splits per source: the
+  statements go to `bank-statement-to-dto`, the rest continue below in this same pass — a mixed batch is not a
+  reason to send the whole run to either skill alone.
 - **Anything else** — a contract, an invoice, an offer or HR order, a register, a report, a website capture already
   rendered to a file, a CRM export — continue below, in this skill.
 
-This is the only point at which a document's own shape sends the run to a different skill entirely. A large
+This is the only point at which a source's own shape sends the run to a different skill entirely. A large
 structured dataset that is not a bank statement does not leave here — see "The sources" above for how it is read
 without being read whole.
 
@@ -329,6 +348,13 @@ downstream can undo. **Run it once with `dry_run: true` first** on anything unfa
 flag — read back the per-currency (or per-reading) totals it reports, and only then run the call above for real; it is
 idempotent by each row's own ref, so a rerun of the same file posts nothing twice. Pass `timezone` when the source
 names one and its rows carry no offset of their own, the same reason a statement needs it.
+
+**A source can be a log against many subjects, not one** — a shared meter log for a block of properties, a combined
+rent ledger for several tenants, a batch of readings across a fleet. When it is, give every row a
+`uniq_actor_field_value` instead (whatever the source uses to tell its subjects apart — a meter id, a unit number, a
+tax id), and pass `actor_field`+`actor_type` to `post_statement` instead of one `actor_id`: each row then resolves its
+own subject from its own value, rather than every reading landing on whichever one subject Pass 4 resolved. See
+`bank-statement-to-jsonl`'s "One actor, or many" for how to tell which case this is.
 
 Report this pass **separately** from the graph ops — what was found, whether it was parsed and validated, and the
 posting's own counts (written, duplicates, per-side totals) — never folded into "the ops applied" as though a posting
