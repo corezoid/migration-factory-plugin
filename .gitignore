@@ -28,5 +28,13 @@ server/.env
 .DS_Store
 Thumbs.db
 
-# agent worktrees the Claude Code harness creates while working here
-.claude/worktrees/
+# the Claude Code harness's own local state — settings, worktrees, ad hoc skills —
+# never meant to be shared
+.claude/
+.playwright-mcp/
+
+# a session's own debug output: full run transcripts (real document content can end
+# up in these) and ad hoc screenshots taken while testing
+session-run_*.json
+img_1.png
+preview-1.png
