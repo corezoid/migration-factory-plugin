@@ -1,284 +1,139 @@
 # migration-factory-plugin-mcp
 
-An MCP server with five tools: three over a Digital Twin layer in Simulator,
-and one over the other end of the job — reading the source.
+The MCP server behind the `migration-factory-plugin`: five tools over stdio —
+`export_graph`, `apply_graph`, `find_records`, `read_page` and
+`post_statement`. Originally a Go module; rewritten in Python on the official
+[`mcp` SDK](https://github.com/modelcontextprotocol/python-sdk) to add a
+batch mode to `post_statement` (see below) without changing any of the five
+tools' contracts — a skill written against the Go version needs no changes.
 
-| tool | what it does |
+## Tools
+
+| Tool | Arguments |
 |---|---|
-| `export_graph(layer, dir?)` | writes `graph.values.yaml`, `graph.ids.json` and `types.schema.yaml` into `dir` (default: the current directory) |
-| `apply_graph(ops, write?, layer?, partial?, keep_export?)` | plans a `graph.ops.yaml` against the live layer and returns the diff; `write: true` applies it and refreshes the export beside it |
-| `find_records(type, values, fields?, dir?)` | answers, per value, whether a record of that type already carries that identity — the check to run before creating one |
-| `read_page(url)` | renders one web page to Markdown through Firecrawl — one address, one page, no crawl |
+| `export_graph` | `layer` (required), `dir` |
+| `apply_graph` | `ops` (required), `write`, `layer`, `partial`, `keep_export` |
+| `find_records` | `type` (required), `values` (required), `fields`, `dir` |
+| `read_page` | `url` (required), `images` |
+| `post_statement` | `account_name` (required), then either `actor_id`+`path` (one actor), `actor_field`+`actor_type`+`path` (many actors, resolved per row), or `statements` (a batch — see below) |
 
-`apply_graph` plans and writes in the same call when `write: true` — the diff
-comes back either way, so a caller that means to import does not need a
-separate dry run. Omitting `write` plans only. Ops are overwrites, so replaying
-an unchanged file writes nothing and reports `already applied`.
+Every tool also takes an optional `sim` object (`base_url`, `api_key`,
+`workspace_id`, `group_id`) — the Simulator workspace THAT call writes to,
+when the caller names one. Pass it unchanged on every call; leaving it out on
+one call sends that call to the server's own workspace (its environment)
+instead.
 
-An op is addressed either by `at:` (a node on the layer) or by `type:` + `ref:`
-(a record of that type, read by its business key and created when there is
-none). A created record is an actor of its form and is not placed on the
-canvas, so it is absent from the next export — the stamped uuid and the ref are
-what find it. `ref:` is required precisely because it, not the file, is what
-stops a second run of the same document creating a second record.
+## post_statement: single file vs. batch
 
-`find_records` is what makes that second address safe to reach for. The layer
-holds the nodes somebody placed on it; the form holds every record of the type,
-including the ones no graph shows. Asking the form first turns "the canvas has
-no free slot" into "no record for this counterparty exists yet", which are
-different questions with different answers.
-
-It probes each value against the fields the type marks as identity keys, then
-the actor's title, and reports the verdict with the ref to write to. No field
-name is special to this server — a caller whose source identifies subjects by
-something the form does not mark names those fields instead. It returns a
-verdict rather than a listing on purpose: the version that wrote the form's
-records to a file was searched wrong by its caller, which read "no match" out
-of its own bug and created fifteen records unchecked.
-
-A write also keeps `result.json` beside the ops file — the running tally of
-what this document has done to the graph:
-
-```json
-{
-    "количество заполненных дырок": 10,
-    "количество обновленных акторов": 5,
-    "количество созданных акторов": 5,
-    "заполненные дырки": ["<uuid>", "..."],
-    "обновленные акторы": ["<uuid>", "..."],
-    "созданные акторы": ["<uuid>", "..."]
-}
 ```
+post_statement(account_name: "Bank Statement", actor_id: "<uuid>", path: "<file>.jsonl")
+```
+posts one file. For more than a handful of actors — a monthly usage export
+with 200 accounts, say — pass a batch instead of looping the tool call
+yourself:
+```
+post_statement(
+  account_name: "State Changes",
+  statements: [
+    {actor_id: "<uuid-1>", path: "<file-1>.jsonl"},
+    {actor_id: "<uuid-2>", path: "<file-2>.jsonl", currency_name: "UAH"},
+    ...
+  ],
+)
+```
+Both forms post through the exact same `ledger.post()` — the same
+idempotency-ref algorithm (`ref_for`, in `migration_factory_plugin_mcp/ledger.py`),
+the same account-pair bootstrap, the same retried-then-fatal group-share (see
+below). The batch form is not a different implementation; it is a loop over
+the single-file one, run server-side, with results aggregated per actor plus
+a grand total, and a consolidated `result.json` update.
 
-It is cumulative and keyed by uuid, because applying the same file more than
-once is normal — after a partial run, after an edit, or just to be sure. Each
-node is counted the first time it is written and never again, and it stays in
-the list it first landed in: a hole filled today is an ordinary node tomorrow,
-and writing to it again must not make it both a filled hole and an updated
-actor. The lists are the record; the three counts are derived from them, so a
-file trimmed by hand still adds up.
+A newly bootstrapped pair is shared with `sim.group_id`'s group so more than
+the run's own key can see what it posted. A pair just created can briefly
+403 its own creator sharing it — confirmed live: the exact same share call,
+replayed minutes later with no code change, succeeded, which is an
+eventual-consistency window on Simulator's side rather than a real
+permissions gap. So a refused share is retried three times (5s, 10s, 15s)
+before it is believed, and if it still fails after that, `post()` raises and
+the run stops — rows nobody but this run's key could see are worse than
+rows not posted at all.
 
-### Reading a page
+A file's rows do not have to name one fixed actor. When they don't — a
+card-processor export, a combined ledger — the `.jsonl` gives each row a
+`uniq_actor_field_value` (see `bank-statement-to-jsonl`) instead of the file
+naming one actor:
+```
+post_statement(account_name: "Bank Statement", actor_field: "iban",
+               actor_type: "client", path: "<file>.jsonl", dir: "<export dir>")
+```
+`actor_type` is a slug from that directory's `types.schema.yaml` and
+`actor_field` a field name on it; each row resolves its own actor by filtering
+Simulator's actors of that type for `actor_field` = the row's own
+`uniq_actor_field_value`. More than one match is not an error — the most
+recently created actor wins. A row with no `uniq_actor_field_value` still
+falls back to `actor_id` when one was also given, so a file can mix a few
+unattributed rows into an otherwise single-actor run. `actor_field` and
+`actor_type` go together and either can be set per job in a `statements`
+batch, in place of that job's `actor_id`.
 
-`read_page` is the odd one out: it touches no layer and needs no Simulator
-key. It exists because a source is not always a file. A website source reaches
-the agent as the Markdown of **one** address — mf-api renders it with the same
-provider and hands that over as the document — and when the address was a site
-root, the front page is all of it. Whether the rest of the site is worth
-reading is then a judgement the agent makes with the layer in front of it, and
-this is what it makes it with: one call, one page, the same rendering as the
-document it already has, so a page read here and a page handed over compare
-like for like.
-
-There is no crawl here and there will not be one. Reading a site means
-deciding which pages matter and asking for those, which is the decision that
-keeps a twin's `[company]` node filled from an "about" page instead of from
-four hundred product listings.
-
-Main content only: navigation, ads and cookie banners are dropped by the
-provider. A page it could not read at all — a login wall, a bot check, a dead
-link — comes back as an error whose message says whether asking again is worth
-anything, and a page that renders to no text is an error too rather than an
-empty answer. "The reader could not see it" and "the site says nothing about
-it" license different next moves, and only the second one licenses writing
-that down.
-
-This is a self-contained Go module. It shares no code with the repository it
-currently sits in: `internal/graph` holds the export, apply and listing logic,
-`internal/simulator` is a cut-down client for the REST routes the three graph
-tools use — read a layer's nodes and edges, read an actor by id or by ref,
-create one, write one back, read a form, list a form's actors — and
-`internal/firecrawl` is a one-route client for the page reader. Copy the
-`migration-factory-plugin` directory anywhere and it still builds.
+**Do not reimplement statement posting outside this tool.** Idempotency
+depends on `ref_for` producing byte-for-byte the same ref for the same row on
+every run; a hand-rolled re-derivation of that hash (even one that looks
+equivalent) will not match, and duplicate detection silently stops working
+for that data. If a call needs more throughput than the batch form gives you,
+that is a reason to improve this tool, not to call the Simulator API
+directly.
 
 ## Configuration
 
-Everything comes from the environment. There is no config file to find — an
-MCP client starts its servers with a working directory of its own choosing,
-usually nowhere near any checkout.
-
-| variable | what it is |
+| Variable | Purpose |
 |---|---|
-| `SIM_BASE_URL` | the gateway. A bare host is enough: `mw.simulator.company` becomes `https://mw.simulator.company/papi/1.0` |
-| `SIM_API_KEY` | a workspace API key from account.corezoid.com, scoped to one workspace on one gateway |
-| `DEFAULT_SIM_API_KEY` | the key used when `SIM_API_KEY` is unset — see below |
-| `SIM_WORKSPACE_ID` | the workspace the key is scoped to, read only for a picture upload, which names its workspace in the path. Unset asks the actor's form |
-| `SIM_GROUP_ID` | the group every record `apply_graph` creates is shared to, view and modify on that actor only — a record is off the layer, so the layer's share never reaches it. Also names and shares the account pairs `post_statement` bootstraps (appended to `account_name`, e.g. `Bank Statement 131107`), so the next session of the same person does not ask for a pair it did not create and get refused 403. Optional: unset or not a positive integer shares nothing, names nothing, said once on stderr |
-| `FIRECRAWL_BASE_URL` | the Firecrawl v2 instance `read_page` renders through. Optional: unset means the shared dev instance, which is the one mf-api renders website sources with |
-| `FIRECRAWL_API_KEY` | that instance's key |
-| `DEFAULT_FIRECRAWL_API_KEY` | the key used when `FIRECRAWL_API_KEY` is unset — same reasoning as the Simulator one, and likewise not filled in by `../.mcp.json` |
+| `SIM_BASE_URL` | Simulator gateway. A bare host works — normalized to `https://<host>/papi/1.0`. Unset uses the client's own default. |
+| `SIM_API_KEY` | Workspace API key. Required (here or via `sim.api_key` per call). |
+| `DEFAULT_SIM_API_KEY` | Fallback for `SIM_API_KEY`, meant to be pinned by a deployer; a caller-supplied `SIM_API_KEY` always wins. |
+| `SIM_WORKSPACE_ID` | Workspace (accId) file uploads go into. Needed by `apply_graph` (pictures) and `post_statement`. |
+| `SIM_GROUP_ID` | Single Account group every created record / posted pair is shared to. Unset shares nothing (and says so once, in the log). |
+| `FIRECRAWL_BASE_URL` | Page-reader instance. Unset uses the shared default. |
+| `FIRECRAWL_API_KEY` | Required for `read_page` only — the other four tools work with no Firecrawl key. |
+| `DEFAULT_FIRECRAWL_API_KEY` | Fallback for `FIRECRAWL_API_KEY`, same precedence rule as the Simulator pair. |
+| `MIGRATION_FACTORY_PLUGIN_CWD` | Set by `launch-mcp`: the directory the MCP client actually started in, so a relative `dir`/`path`/`ops` in a tool call resolves against the user's project. |
 
-Two pairs, and that is the whole list. Each pair says *where* the server
-talks, and the two are **loaded apart**: the graph tools ask for the Simulator
-pair, `read_page` asks for the Firecrawl one. A server with no Firecrawl key
-still exports and applies layers, and a server with no Simulator key still
-reads a page — refusing every tool because the half the caller is not using
-was left unset is how a working install looks broken. Nothing else is
-configurable:
-
-- there is no workspace to set — the key carries it. The one route that wants
-  an `accId`, the actor listing behind `find_records`, is given the workspace
-  the form itself reports;
-- there is no default layer, directory or write flag — every one of those is a
-  per-call decision, so it is an argument of the tool call, where the caller
-  can see it and change it;
-- timeouts and read concurrency are fixed: a Simulator request is capped at
-  60s, a scrape at 2 minutes, a tool call at 3, 5 or 10 minutes, and reads run
-  8 at a time. If those are wrong for a gateway they are wrong for everyone on
-  it, and the fix belongs in the code.
-
-The key and the gateway have to name the same environment — a key issued for
-one gateway is refused by another with a 401.
-
-`DEFAULT_SIM_API_KEY` exists because the key is not always the installer's to
-pick: a deployer can build one into the environment it launches the server in,
-so a plugin nobody configured still works, while a caller that has a better
-key — mf-api, which starts each cc-api project with the migration session's
-*own* workspace key — exports `SIM_API_KEY`, and that wins. The two are
-separate variables rather than one with a default precisely so that can
-happen: a value spelled out in `.mcp.json` is not something an inherited
-environment can displace. `../.mcp.json` in this repository pins neither key —
-it is public — so both are read from the environment. A literal `${...}`,
-which is what an unset placeholder without a `:-` fallback expands to, counts
-as unset here and falls through to the default.
-
-A missing variable is reported when a tool is called, not at startup: the
-client launches the server eagerly, long before anyone asks it for anything,
-and a server that exits at launch shows up as a broken plugin rather than as a
-missing setting.
+On a host that filters the process environment (Hermes: a portable Agent
+Plugins v1 host), credentials instead come from a `.env` file in
+`PLUGIN_DATA` (the package's own writable directory) — see
+`migration_factory_plugin_mcp/envfile.py`. The process environment always
+wins; the file only fills a gap.
 
 ## Running it
 
-As a Claude Code plugin there is nothing to do: `../.mcp.json` runs
-`../launch-mcp`, which runs this module with `go run` and forwards the two
-variables from your shell. Compilation is cached, so it costs a fraction of a
-second per session and the code that runs is always the code in the tree.
-
-That is the second choice, though. The launcher first looks in `../bin` for a
-binary named after this platform the way Go names it —
-`migration-factory-plugin-mcp-$(uname -s)-$(uname -m)`, normalized — because a
-host with no toolchain has no other way to start the server; `make release`
-builds the committed pair, `linux/amd64` and `linux/arm64`. On Linux on one of
-those two architectures the binary therefore shadows the working tree: set
-`MIGRATION_FACTORY_PLUGIN_FROM_SOURCE=1` while developing, or
-`MIGRATION_FACTORY_PLUGIN_BIN=/path/to/binary` to pin a build of your own.
-A stale `bin/` is the failure mode to remember — rebuild it when the server
-changes.
-
-The launcher is a script and not a `go run` line in the config because of the
-things such a line cannot do on its own: choose between the binary and the
-source, and take the module from the *current* directory (`-C` says otherwise,
-but then leaves the server itself sitting there, so the real working directory
-is handed over in `MIGRATION_FACTORY_PLUGIN_CWD` and relative paths in a tool
-call resolve against it) with a toolchain on a `PATH` the client may not have.
-
-In any other MCP client, point it at the launcher the same way:
-
-```json
-{
-  "mcpServers": {
-    "migration-factory-plugin": {
-      "command": "/path/to/migration-factory-plugin/launch-mcp",
-      "env": {
-        "SIM_BASE_URL": "mw.simulator.company",
-        "SIM_API_KEY": "...",
-        "FIRECRAWL_API_KEY": "..."
-      }
-    }
-  }
-}
+Development:
 ```
-
-`make release` rebuilds the two binaries the plugin ships — `../bin/migration-factory-plugin-mcp-linux-amd64`
-and `-linux-arm64`, static and stripped — and they are committed, so run it and
-commit the result whenever this module changes. `make build` is the local
-variant: one binary for this machine, under the unsuffixed name the launcher
-falls back to.
+make venv     # creates .venv, installs the package editable + pytest/ruff
+make check    # format-check + lint + test
+```
+A client (Claude Code, Hermes) launches the server via `../launch-mcp`, which
+finds a `python3` on the host and runs `python3 -m migration_factory_plugin_mcp`.
+A host with no `pip`/network at runtime (Hermes) instead gets a vendored
+wheel bundle under `../vendor/<platform>/`, rebuilt with `make vendor` and
+committed the same way the Go version committed prebuilt binaries under
+`bin/`.
 
 ## Development
 
-```bash
-make check          # gofmt, go vet, go test — no network
-make mcp-handshake  # initialize + tools/list over stdio, no network
-make release        # the committed linux/amd64 + linux/arm64 binaries
-```
-
-The live targets reach a real gateway and skip without `SIM_LIVE=1`. They read
-a `.env` beside this Makefile when there is one (it is gitignored):
-
-```bash
-make live-export LAYER=<uuid> OUT_DIR=./out
-make live-apply OPS=./out/graph.ops.yaml            # dry run: prints the diff
-make live-apply OPS=./out/graph.ops.yaml WRITE=1    # writes it
-```
+- `make test` — the unit suite (no network).
+- `make live-export` / `live-apply` / `live-find` / `live-read` / `live-post`
+  — opt-in tests against a real Simulator/Firecrawl workspace, gated by
+  `SIM_LIVE=1` and the usual `SIM_LAYER`/`SIM_OPS`/`FIRECRAWL_URL`-style env
+  vars (see `tests/live/test_live.py`). Never run in CI.
+- `make mcp-handshake` — a raw `initialize` + `tools/list` piped through
+  `../launch-mcp`, no network, to confirm the stdio protocol itself works.
 
 ## Protocol
 
-MCP over stdio, hand-rolled: newline-delimited JSON-RPC 2.0 with four methods
-worth answering (`initialize`, `ping`, `tools/list`, `tools/call`). A server
-this small is not worth a dependency. Anything on stdout is protocol; logs go
-to stderr.
-
-A tool that fails reports through its result with `isError: true`, not as a
-JSON-RPC error — the model is meant to read the message and correct itself.
-
-
-## post_statement
-
-Records a batch of transactions onto an actor, from a JSONL of rows. A parsed
-bank statement is the common case, but nothing here is statement-specific: any
-source that reduces to dated rows of money in and money out posts the same way.
-
-    post_statement(account_name: "Bank Statement", actor_id: "<uuid>", path: "statement.jsonl")
-
-`account_name` is the account-name category **by name**, not an id: the pair
-route resolves names, and the workspace's name register has no lookup by id —
-3000 names and only a name query. The name is created if the workspace lacks
-it, and the pair it bootstraps is always named with the session's group
-appended (`SIM_GROUP_ID`, when the server was given one) — see above.
-
-**Why both sides get used.** A (name, currency) pair on an actor is two
-accounts with their own ids, one `incomeType: "debit"` and one `"credit"`, and
-a transaction carries no direction of its own — the side is decided by which id
-it is posted to. So `debit_sum` lands on the debit id and `credit_sum` on the
-credit id. The card then totals the pair as credit minus debit, which is the
-net movement, while both turnovers remain readable separately and comparable
-with the two columns the statement itself prints. Nothing has to be signed for
-that to work, and a zero column is not posted at all.
-
-**Why a pair is bootstrapped for every currency.** `POST /accounts/pair` creates
-or returns, so there is nothing to check first — and it is also what grants
-access to the pair. Attaching the account alone does not, and a transaction
-without that access is refused 403. Resolution is cached per currency for the
-run, which is a cost saving and never a correctness one.
-
-**Why each row carries its own date.** The platform stamps a transaction with
-the moment of the call and keeps the real one in `originalDate` — so a run that
-does not send that field loads a whole statement as if every row of it happened
-on import day. The row's `transaction_date`, plus its `transaction_time` where
-the statement printed one, is what goes there. The unit is **milliseconds**:
-the gateway's own UI multiplies by 1000 on the way in and divides by 1000 on
-the way out, and a seconds value lands the row in 1970.
-
-The rows print no offset, so the zone is a decision: it is read as UTC unless
-`timezone` names an IANA one, e.g. `Europe/Kyiv` for a statement whose issuing
-bank is known. UTC invents nothing, but it is up to a few hours off the times
-the statement prints, and a midnight row can read as the day before for a
-viewer west of it. A zone that does not resolve is refused rather than quietly
-ignored, and a row whose date is missing or is not `yyyy-mm-dd` stops the run
-before anything is written — a transaction confidently stamped with today is
-afterwards indistinguishable from one that really happened today.
-
-**Idempotency.** Each transaction's ref is derived from the row it came from
-plus the side it lands on, so re-running the same file posts nothing twice and
-an interrupted run can simply be repeated. The platform refuses a repeated ref
-with `400 Not unique ref`; that is counted as a duplicate, not a failure.
-
-Run `dry_run: true` first on anything unfamiliar — it resolves the pairs and
-totals the file per currency without writing, which is the cheapest way to check
-the turnovers against the statement before any of it lands.
-
-**Currency defaults.** A row's own `currency` wins; a row that leaves it empty
-falls back to `currency_name` when the caller passed one — the statement's own
-currency, usually read off its header — and to `XXX` (ISO 4217's "no currency")
-otherwise, so *unknown* stays distinguishable from *assumed*.
+Standard MCP over stdio, served by the official `mcp` SDK's low-level
+`Server` (not `FastMCP` — the five tools' JSON-Schema `inputSchema`s are
+hand-written to match the original Go tool definitions exactly, and every
+handler builds its own text response). A tool that fails reports through the
+result (`isError: true`), never as a bare JSON-RPC protocol error — the model
+is meant to read the message and correct itself, the same design the Go
+version used.

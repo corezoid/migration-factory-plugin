@@ -1,0 +1,23 @@
+[project]
+name = "migration-factory-plugin-mcp"
+version = "0.1.0"
+description = "MCP server for the migration-factory-plugin: export a Digital Twin layer, apply ops, check records, read pages, post statements."
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.12,<2",
+    "ruamel.yaml>=0.18,<1",
+    "tzdata; sys_platform != 'win32'",
+]
+
+[project.scripts]
+migration-factory-plugin-mcp = "migration_factory_plugin_mcp.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["migration_factory_plugin_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -604,19 +604,23 @@ secret is part of the secret.
 
 ## The server
 
-It is a separate Go module under [`server/`](server/), sharing no code with
-this repository — see [server/README.md](server/README.md) for its layout, its
+It is a Python package under [`server/`](server/), sharing no code with this
+repository — see [server/README.md](server/README.md) for its layout, its
 `make check` / `make live-export` targets and the standalone MCP config. The
-whole repository can be copied out as a unit.
+whole repository can be copied out as a unit. It was originally a separate Go
+module; the rewrite kept every tool's contract identical (a skill written
+against the Go version needs no changes) and added a batch mode to
+`post_statement` so a run with many actors is one tool call instead of one
+per actor.
 
-`bin/` holds the two Linux builds the plugin ships, and they are the only
-build artifacts in the repository. `make -C server release` rebuilds both, and
-**a change to the server is not released until they are rebuilt and
-committed**: a host without Go runs the binary, not the source beside it. A
-host with Go builds from source and never reads them — unless it is Linux on
-one of those two architectures, where the binary wins; export
-`MIGRATION_FACTORY_PLUGIN_FROM_SOURCE=1` while working on the server there to
-put the working tree back in charge.
+`vendor/` holds the wheel bundles the plugin ships for a host with no
+pip/network at runtime (Hermes), one per platform — the Python analogue of
+the Go version's prebuilt binaries. `make -C server vendor` rebuilds them, and
+**a change to the server's dependencies is not released until they are
+rebuilt and committed**: a host with no network runs from the vendored
+bundle, not from a live `pip install`. Export
+`MIGRATION_FACTORY_PLUGIN_FROM_SOURCE=1` while working on the server on such a
+host to put its own environment back in charge instead.
 
 
 ## Bank statements (bank-statement-to-jsonl)
@@ -634,6 +638,16 @@ strings — dot decimal, two places, unsigned, `"0.00"` on the empty side — so
 nothing downstream re-floats them. `currency` is always present: a three-letter
 code, or `XXX` (ISO 4217's own "no currency") when the statement never names
 one, so *unknown* stays distinguishable from *assumed*.
+
+**One actor, or many.** Most statements are one account's history, and the
+record stops there. A source that mixes several actors' rows in one file — a
+card-processor export, a combined ledger — instead gets `uniq_actor_field_value`
+on every row: whatever the source itself uses to tell its actors apart (an
+IBAN, a card number, a tax id), taken verbatim, never invented. `post_statement`
+reads it back: pass `actor_field` (the field name) + `actor_type` (its type
+slug) instead of a single `actor_id`, and each row resolves its own actor from
+its own `uniq_actor_field_value` — more than one match takes the most recently
+created actor.
 
 The skill never reads the statement into the run. It samples one page with
 `scripts/probe.py`, which clusters the right edges of numeric words into
@@ -713,3 +727,10 @@ ops file undoes.
 The run does not post when the parser failed its reconciliation: a JSONL that
 did not reconcile is a ledger with rows missing or doubled, and posting it is
 worse than not posting.
+
+**When the parser reports many actors instead of one.** This skill's premise —
+one header, one client, one `actor_id` — no longer holds, and the posting call
+above is the wrong one: pass `actor_field`+`actor_type` to `post_statement`
+instead, so each row resolves its own actor from its own
+`uniq_actor_field_value` against the client register, rather than every row
+sharing the one client this run resolved from the header.

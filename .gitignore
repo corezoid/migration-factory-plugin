@@ -1,9 +1,8 @@
-# Binaries. bin/ is build output, except the release binaries the plugin ships:
-# a host with no Go toolchain (a container) can start the server only from one
-# of those, so they are committed. `make -C server release` rebuilds them.
+# Binaries. bin/ is build output — the Go server this once shipped compiled
+# release binaries here for a toolchain-less host; the Python server that
+# replaced it ships as source plus vendor/ instead, so nothing here is
+# committed any more.
 bin/*
-!bin/migration-factory-plugin-mcp-linux-amd64
-!bin/migration-factory-plugin-mcp-linux-arm64
 *.exe
 *.exe~
 *.dll
@@ -13,6 +12,11 @@ bin/*
 # Test artifacts
 coverage.out
 *.test
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+server/.venv/
 
 # credentials the server's make targets read (SIM_BASE_URL / SIM_API_KEY)
 server/.env

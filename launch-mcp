@@ -1,25 +1,24 @@
 #!/bin/sh
-# Launcher for the migration-factory-plugin MCP server. It runs a prebuilt
-# binary when one is there for this platform, and `go run` otherwise — so a
-# clone works with nothing but a Go toolchain, and a host with no Go at all
-# (a container, typically: the Hermes image has none) still starts the server
-# from the binaries shipped under bin/.
+# Launcher for the migration-factory-plugin MCP server (Python).
 #
-# It exists as a script rather than a command line in .mcp.json because of the
-# things such a line cannot do itself:
+# Unlike the Go version this replaces, there is no per-platform binary to
+# pick: Python is interpreted, so the package under server/ runs as-is on
+# any host with a python3 interpreter. The only thing that varies by
+# platform is which vendored wheel bundle (bundled for a host with no
+# pip/network, such as the Hermes container) to put on PYTHONPATH.
 #
-#   1. it has to pick between the binary and the source, and say something
-#      useful when neither is available;
-#   2. `go run` needs the module's directory to be the current one, and `-C` is
-#      the only way to say so — which then leaves the *server* running there,
-#      nowhere near the user's project, so the real working directory is handed
-#      over in MIGRATION_FACTORY_PLUGIN_CWD and the server resolves relative
-#      paths against it;
-#   3. the client launches this from its own environment, not from a login
-#      shell, so PATH may be missing everything a terminal has.
+# It exists as a script rather than a command line in .mcp.json because of
+# the things such a line cannot do itself:
 #
-# stdout is the MCP protocol: everything this script and the compiler say goes
-# to stderr.
+#   1. the real working directory has to be handed over in
+#      MIGRATION_FACTORY_PLUGIN_CWD before `python3 -m` changes it out from
+#      under a relative path in a tool call;
+#   2. picking an interpreter has to fall back through a short list of
+#      common install locations, because the client launches this from its
+#      own environment, not from a login shell, so PATH may be missing
+#      everything a terminal has.
+#
+# stdout is the MCP protocol: everything this script says goes to stderr.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -27,71 +26,65 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 say() { printf 'migration-factory-plugin: %s\n' "$1" >&2; }
 
 # The directory the client started us in, so a relative path in a tool call
-# resolves against the user's project rather than against this module. A host
-# that starts the server inside the plugin's own directory instead — a portable
-# Agent Plugins v1 one pins the cwd to the package — can point this somewhere
-# useful by setting the variable itself, so an existing value is kept.
+# resolves against the user's project rather than against this package.
 : "${MIGRATION_FACTORY_PLUGIN_CWD:=$(pwd)}"
 export MIGRATION_FACTORY_PLUGIN_CWD
 
-# The platform, spelled the way Go spells it, because that is how the binaries
-# under bin/ are named.
+# An explicit interpreter wins over everything and is never silently
+# skipped: a host that names one means it.
+if [ -n "${MIGRATION_FACTORY_PLUGIN_PYTHON:-}" ]; then
+	if [ -x "${MIGRATION_FACTORY_PLUGIN_PYTHON}" ] || command -v "${MIGRATION_FACTORY_PLUGIN_PYTHON}" >/dev/null 2>&1; then
+		python_bin="${MIGRATION_FACTORY_PLUGIN_PYTHON}"
+	else
+		say "MIGRATION_FACTORY_PLUGIN_PYTHON=${MIGRATION_FACTORY_PLUGIN_PYTHON} is not an executable"
+		exit 1
+	fi
+else
+	find_python() {
+		for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+			if command -v "$candidate" >/dev/null 2>&1; then
+				command -v "$candidate"
+				return 0
+			fi
+		done
+		for candidate in \
+			/usr/bin/python3 \
+			/usr/local/bin/python3 \
+			/opt/homebrew/bin/python3 \
+			"${HOME:-}/.local/bin/python3"; do
+			if [ -x "$candidate" ]; then
+				printf '%s\n' "$candidate"
+				return 0
+			fi
+		done
+		return 1
+	}
+	python_bin=$(find_python) || {
+		say "no python3 interpreter found on this host"
+		say "install Python 3.10+: https://www.python.org/downloads/"
+		exit 1
+	}
+fi
+
+# The platform, matching the vendor/ directory naming convention (mirrors
+# the bin/migration-factory-plugin-mcp-$goos-$goarch naming the Go version
+# used, so the deploy story — commit one bundle per platform for a host
+# with no network — stays the same shape).
 goos=$(uname -s | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
 case $(uname -m) in
 x86_64 | amd64) goarch=amd64 ;;
 aarch64 | arm64) goarch=arm64 ;;
 *) goarch=$(uname -m) ;;
 esac
-platform="$goos/$goarch"
-binary="$here/bin/migration-factory-plugin-mcp-$goos-$goarch"
+vendor_dir="$here/vendor/$goos-$goarch"
 
-# An explicit binary wins over everything and is never silently skipped: a host
-# that names one means it.
-if [ -n "${MIGRATION_FACTORY_PLUGIN_BIN:-}" ]; then
-	if [ -x "$MIGRATION_FACTORY_PLUGIN_BIN" ]; then
-		exec "$MIGRATION_FACTORY_PLUGIN_BIN" "$@"
-	fi
-	say "MIGRATION_FACTORY_PLUGIN_BIN=$MIGRATION_FACTORY_PLUGIN_BIN is not an executable file"
-	exit 1
+pythonpath="$here/server${PYTHONPATH:+:$PYTHONPATH}"
+# The vendored bundle is used unless a developer asked for the environment's
+# own install (MIGRATION_FACTORY_PLUGIN_FROM_SOURCE=1 — e.g. an editable
+# `pip install -e .`, where the vendor bundle would shadow it).
+if [ -d "$vendor_dir" ] && [ -z "${MIGRATION_FACTORY_PLUGIN_FROM_SOURCE:-}" ]; then
+	pythonpath="$vendor_dir:$pythonpath"
 fi
+export PYTHONPATH="$pythonpath"
 
-# Then the shipped binary for this platform, unless a developer has asked for
-# the working tree: a build in bin/ is a release artifact and says nothing
-# about the source next to it.
-if [ -z "${MIGRATION_FACTORY_PLUGIN_FROM_SOURCE:-}" ]; then
-	for candidate in "$binary" "$here/bin/migration-factory-plugin-mcp"; do
-		if [ -x "$candidate" ]; then
-			exec "$candidate" "$@"
-		fi
-	done
-fi
-
-# find_go locates the toolchain: PATH first, then where installers put it.
-find_go() {
-	if command -v go >/dev/null 2>&1; then
-		command -v go
-		return 0
-	fi
-	for candidate in \
-		/usr/local/go/bin/go \
-		/opt/homebrew/bin/go \
-		/usr/local/bin/go \
-		/usr/lib/go/bin/go \
-		"${HOME:-}/go/bin/go" \
-		"${HOME:-}/.local/go/bin/go"; do
-		if [ -x "$candidate" ]; then
-			printf '%s\n' "$candidate"
-			return 0
-		fi
-	done
-	return 1
-}
-
-go_bin=$(find_go) || {
-	say "no server to run for $platform"
-	say "no binary at $binary, and no Go toolchain to build one from source"
-	say "build one with: make -C $here/server release   (or install Go: https://go.dev/dl/)"
-	exit 1
-}
-
-exec "$go_bin" run -C "$here/server" . "$@"
+exec "$python_bin" -m migration_factory_plugin_mcp "$@"
