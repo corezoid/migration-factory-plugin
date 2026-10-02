@@ -6,6 +6,7 @@ migrating every existing result.json this has ever written.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -44,6 +45,8 @@ class StatementRecord:
     # a reader of result.json is not left with actor_id as a placeholder
     # label ("field:client.iban") and nothing that says who was really paid.
     actors: list[str] = field(default_factory=list)
+    created_account_refs: Optional[list[str]] = None
+    reused_account_refs: Optional[list[str]] = None
 
     def to_json(self) -> dict:
         d = {
@@ -58,6 +61,9 @@ class StatementRecord:
             d["акторы"] = self.actors
         if self.failed:
             d["не проведено"] = self.failed
+        if self.created_account_refs is not None and self.reused_account_refs is not None:
+            d["createdAccountRefs"] = self.created_account_refs
+            d["reusedAccountRefs"] = self.reused_account_refs
         return d
 
     @staticmethod
@@ -71,6 +77,8 @@ class StatementRecord:
             failed=d.get("не проведено", 0),
             turnover=[StatementTurnover.from_json(t) for t in d.get("обороты", []) or []],
             actors=list(d.get("акторы", []) or []),
+            created_account_refs=(list(d["createdAccountRefs"]) if "createdAccountRefs" in d else None),
+            reused_account_refs=(list(d["reusedAccountRefs"]) if "reusedAccountRefs" in d else None),
         )
 
 
@@ -93,6 +101,9 @@ class RunResult:
     updated: list[str] = field(default_factory=list)
     created: list[str] = field(default_factory=list)
     statements: list[StatementRecord] = field(default_factory=list)
+    accounts_created: Optional[int] = None
+    accounts_reused: Optional[int] = None
+    source_coverage: str = ""
 
     def _known_ids(self) -> set[str]:
         return set(self.holes) | set(self.updated) | set(self.created)
@@ -124,6 +135,15 @@ class RunResult:
         appending a duplicate; returns whether the entry was new."""
         for i, existing in enumerate(self.statements):
             if existing.ref == rec.ref:
+                if (existing.created_account_refs is not None and existing.reused_account_refs is not None
+                        and rec.created_account_refs is not None and rec.reused_account_refs is not None):
+                    rec.created_account_refs = sorted(set(existing.created_account_refs) | set(rec.created_account_refs))
+                    rec.reused_account_refs = sorted(set(existing.reused_account_refs) | set(rec.reused_account_refs))
+                else:
+                    # An older observation cannot be retroactively classified
+                    # as created or reused just because this replay can see it.
+                    rec.created_account_refs = None
+                    rec.reused_account_refs = None
                 self.statements[i] = rec
                 self._recount()
                 return False
@@ -136,10 +156,21 @@ class RunResult:
         self.actors_updated = len(self.updated)
         self.actors_created = len(self.created)
         self.transactions_posted = sum(s.transactions for s in self.statements)
+        if self.statements and all(
+            s.created_account_refs is not None and s.reused_account_refs is not None
+            for s in self.statements
+        ):
+            created = set().union(*(set(s.created_account_refs) for s in self.statements))
+            reused = set().union(*(set(s.reused_account_refs) for s in self.statements))
+            self.accounts_created = len(created)
+            self.accounts_reused = len(reused - created)
+        else:
+            self.accounts_created = None
+            self.accounts_reused = None
 
     def to_json(self) -> dict:
         self._recount()
-        return {
+        d = {
             "количество заполненных дырок": self.holes_filled,
             "количество обновленных акторов": self.actors_updated,
             "количество созданных акторов": self.actors_created,
@@ -149,6 +180,12 @@ class RunResult:
             "созданные акторы": self.created,
             "проведенные выписки": [s.to_json() for s in self.statements],
         }
+        if self.accounts_created is not None and self.accounts_reused is not None:
+            d["accountsCreated"] = self.accounts_created
+            d["accountsReused"] = self.accounts_reused
+        if self.source_coverage:
+            d["sourceCoverage"] = self.source_coverage
+        return d
 
     @staticmethod
     def from_json(d: dict) -> "RunResult":
@@ -157,6 +194,7 @@ class RunResult:
             updated=list(d.get("обновленные акторы", []) or []),
             created=list(d.get("созданные акторы", []) or []),
             statements=[StatementRecord.from_json(s) for s in d.get("проведенные выписки", []) or []],
+            source_coverage=d.get("sourceCoverage", "") or "",
         )
         res._recount()
         return res
@@ -183,6 +221,11 @@ def statement_ref(prefix: str, actor_id: str, account: str, file_path: str) -> s
     """Identity key for a posted statement — a different prefix is a
     deliberate second posting of the same statement, not a duplicate."""
     return "|".join([prefix or "stmt", actor_id, account, os.path.basename(file_path)])
+
+
+def account_ref(account_id: str) -> str:
+    """Stable opaque key for counting one account across statement records."""
+    return hashlib.sha256(account_id.encode("utf-8")).hexdigest()
 
 
 def result_path(ops_path: str = "", from_dir: str = "") -> str:

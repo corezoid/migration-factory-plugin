@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from migration_factory_plugin_mcp import ledger  # noqa: E402
-from migration_factory_plugin_mcp.simulator.finance import AccountSides  # noqa: E402
+from migration_factory_plugin_mcp.simulator.finance import Account, AccountSides  # noqa: E402
 
 
 def test_ref_for_exact_vector():
@@ -90,6 +90,7 @@ class _FakeSim:
         self.share_attempts = 0
         self.shared_with = None
         self.transactions = []
+        self.accounts = {}
 
     def ensure_account_pair(self, workspace_id, account_name, currency):
         return "name-1", 1
@@ -103,7 +104,16 @@ class _FakeSim:
     def ensure_actor_account(self, actor_id, *, name_id, currency_id, account_type="", search=False):
         self.attached = getattr(self, "attached", [])
         self.attached.append(actor_id)
-        return AccountSides(debit=f"{actor_id}-debit", credit=f"{actor_id}-credit")
+        sides = AccountSides(debit=f"{actor_id}-debit", credit=f"{actor_id}-credit")
+        if actor_id not in self.accounts:
+            self.accounts[actor_id] = [
+                Account(sides.debit, name_id, currency_id, "debit"),
+                Account(sides.credit, name_id, currency_id, "credit"),
+            ]
+        return sides
+
+    def get_actor_accounts(self, actor_id):
+        return list(self.accounts.get(actor_id, []))
 
     def create_transaction(self, account_id, *, amount, comment, ref, data, original_date):
         self.transactions.append((account_id, amount, ref))
@@ -186,6 +196,40 @@ def test_post_duplicate_ref_on_rerun():
         second = ledger.post(sim, opts)
         assert first.posted == 1 and first.duplicate == 0
         assert second.posted == 0 and second.duplicate == 1
+        assert first.accounts_created == {"actor-1-debit", "actor-1-credit"}
+        assert first.accounts_reused == set()
+        assert second.accounts_created == set()
+        assert second.accounts_reused == {"actor-1-debit", "actor-1-credit"}
+
+
+def test_account_measurement_failure_is_unknown_not_zero(tmp_path):
+    class UnreadableAccounts(_FakeSim):
+        def get_actor_accounts(self, actor_id):
+            raise RuntimeError("account listing unavailable")
+
+    path = _write_jsonl(tmp_path, [
+        {"transaction_date": "2026-01-01", "debit_sum": "10", "currency": "UAH"},
+    ])
+    res = ledger.post(UnreadableAccounts(), ledger.Options(
+        account_name="Statement", actor_id="actor-1", path=path, workspace_id="ws-1",
+    ))
+    assert res.posted == 1
+    assert not res.account_measurement_complete
+
+
+def test_account_measurement_at_page_limit_is_unknown(tmp_path):
+    class FullPage(_FakeSim):
+        def get_actor_accounts(self, actor_id):
+            return [Account(str(i), "other", 1, "debit") for i in range(100)]
+
+    path = _write_jsonl(tmp_path, [
+        {"transaction_date": "2026-01-01", "debit_sum": "10", "currency": "UAH"},
+    ])
+    res = ledger.post(FullPage(), ledger.Options(
+        account_name="Statement", actor_id="actor-1", path=path, workspace_id="ws-1",
+    ))
+    assert res.posted == 1
+    assert not res.account_measurement_complete
 
 
 def _one_type_set(field_name="iban", field_id="item_1", form_id=42, slug="client", title=""):

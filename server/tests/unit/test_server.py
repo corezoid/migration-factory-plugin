@@ -9,13 +9,14 @@ from migration_factory_plugin_mcp.firecrawl.scrape import Page, PageMetadata  # 
 from migration_factory_plugin_mcp.graph.export import ExportResult  # noqa: E402
 from migration_factory_plugin_mcp.graph.records import FindResult, FoundRecord, ValueCheck  # noqa: E402
 from migration_factory_plugin_mcp.ledger import CurrencyTally, Result  # noqa: E402
-from migration_factory_plugin_mcp.simulator.finance import AccountSides  # noqa: E402
+from migration_factory_plugin_mcp.simulator.finance import Account, AccountSides  # noqa: E402
 
 
 class _FakeSim:
     def __init__(self, actors_by_query=None):
         self.transactions = []
         self.actors_by_query = actors_by_query or {}
+        self.accounts = {}
 
     def ensure_account_pair(self, workspace_id, account_name, currency):
         return "name-1", 1
@@ -24,7 +25,16 @@ class _FakeSim:
         pass
 
     def ensure_actor_account(self, actor_id, *, name_id, currency_id, account_type="", search=False):
-        return AccountSides(debit=f"{actor_id}-debit", credit=f"{actor_id}-credit")
+        sides = AccountSides(debit=f"{actor_id}-debit", credit=f"{actor_id}-credit")
+        if actor_id not in self.accounts:
+            self.accounts[actor_id] = [
+                Account(sides.debit, name_id, currency_id, "debit"),
+                Account(sides.credit, name_id, currency_id, "credit"),
+            ]
+        return sides
+
+    def get_actor_accounts(self, actor_id):
+        return list(self.accounts.get(actor_id, []))
 
     def create_transaction(self, account_id, *, amount, comment, ref, data, original_date):
         self.transactions.append((account_id, amount, ref))
@@ -153,7 +163,22 @@ def test_run_post_statement_single_file(monkeypatch, tmp_path):
     path.write_text(json.dumps({"transaction_date": "2026-01-01", "debit_sum": "10", "credit_sum": "0"}) + "\n")
     text = server.run_post_statement({"account_name": "Bank Statement", "actor_id": "actor-1", "path": str(path)})
     assert "Bank Statement: 1 rows, posted 1 transactions" in text
-    assert (tmp_path / "result.json").exists()
+    tally = json.loads((tmp_path / "result.json").read_text())
+    assert tally["accountsCreated"] == 2
+    assert tally["accountsReused"] == 0
+    assert tally["количество проведенных транзакций"] == 1
+
+
+def test_run_post_statement_replay_does_not_reclassify_created_accounts(monkeypatch, tmp_path):
+    _fake_cfg(monkeypatch)
+    path = tmp_path / "s.jsonl"
+    path.write_text(json.dumps({"transaction_date": "2026-01-01", "debit_sum": "10", "credit_sum": "0"}) + "\n")
+    args = {"account_name": "Bank Statement", "actor_id": "actor-1", "path": str(path)}
+    server.run_post_statement(args)
+    server.run_post_statement(args)
+    tally = json.loads((tmp_path / "result.json").read_text())
+    assert tally["accountsCreated"] == 2
+    assert tally["accountsReused"] == 0
 
 
 def test_run_post_statement_batch(monkeypatch, tmp_path):
@@ -173,6 +198,9 @@ def test_run_post_statement_batch(monkeypatch, tmp_path):
     assert "State Changes: 2 statement(s)" in text
     assert "actor-1" in text and "actor-2" in text
     assert "total: 2 rows, posted 2 transactions" in text
+    tally = json.loads((tmp_path / "result.json").read_text())
+    assert tally["accountsCreated"] == 4
+    assert tally["accountsReused"] == 0
 
 
 def test_run_post_statement_resolves_actor_field_per_row(monkeypatch, tmp_path):

@@ -629,7 +629,7 @@ def _render_post_batch(batch: BatchResult, dry_run: bool, elapsed: float) -> str
 def _record_one_statement(
     dir_arg: str, ref_prefix: str, account_name: str, actor_label: str, path: str, res: Result, dry_run: bool,
 ) -> str:
-    if dry_run or res.posted + res.duplicate == 0:
+    if dry_run or (res.posted + res.duplicate == 0 and not res.accounts_created):
         return ""
     dir_path = config.resolve_path(dir_arg) if dir_arg else os.path.dirname(path)
     result_path = os.path.join(dir_path, result_mod.RESULT_FILE_NAME)
@@ -647,6 +647,14 @@ def _record_one_statement(
                 for c in res.currencies
             ],
             actors=sorted(res.actors) if len(res.actors) > 1 else [],
+            created_account_refs=(
+                sorted(result_mod.account_ref(a) for a in res.accounts_created)
+                if res.account_measurement_complete else None
+            ),
+            reused_account_refs=(
+                sorted(result_mod.account_ref(a) for a in res.accounts_reused)
+                if res.account_measurement_complete else None
+            ),
         )
         tally.add_statement(rec)
         result_mod.write_result(result_path, tally)
