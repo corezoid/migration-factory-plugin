@@ -449,3 +449,11 @@ one thing another ops file cannot undo.
 kind of write: what was found (or that nothing was), whether it parsed and validated, and the posting's own counts —
 rows written, duplicates skipped, per-side totals — quoted from `post_statement`'s own answer, never from memory of
 what the parser produced.
+
+For a Migration Factory run, end the answer with one fenced `json` block containing every field
+and value from `result.json`; this is the machine-readable build tally. `post_statement`
+measures `accountsCreated` and `accountsReused` when it can observe the accounts before
+attaching them. If either field is absent, its value is unknown, not zero. Do not invent it.
+Add `sourceCoverage` only from what was actually read: `full` for the complete intended
+source, `partial` for only part, `literal_only` for just a URL or label, and `failed` when
+the source could not be read. A successful DTO write alone does not establish full coverage.

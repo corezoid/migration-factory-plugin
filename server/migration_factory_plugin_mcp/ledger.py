@@ -123,6 +123,11 @@ class Result:
     currencies: list[CurrencyTally] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     actors: set = field(default_factory=set)
+    # These ids are only kept in memory. The durable tally stores their
+    # hashes, so it can deduplicate accounts without exposing identifiers.
+    accounts_created: set[str] = field(default_factory=set)
+    accounts_reused: set[str] = field(default_factory=set)
+    account_measurement_complete: bool = True
 
 
 @dataclass
@@ -213,12 +218,29 @@ def _resolve(
     sim: SimulatorClient, opts: Options, actor_id: str, currency: str, res: Result, pair_cache: dict,
 ) -> _Sides:
     name_id, currency_id = _resolve_pair(sim, opts, currency, res, pair_cache)
+    before_ids: Optional[set[str]] = None
+    try:
+        before = sim.get_actor_accounts(actor_id)
+        # The API is asked for at most 100 rows. At the page boundary the
+        # answer may be truncated, so it cannot prove a side was newly made.
+        if len(before) < 100:
+            before_ids = {a.id for a in before}
+    except Exception as exc:  # telemetry must not abort an otherwise valid build
+        log.warning("could not measure accounts before ensure on actor %s: %s", actor_id, exc)
+    if before_ids is None:
+        res.account_measurement_complete = False
     try:
         acc = sim.ensure_actor_account(
             actor_id, name_id=name_id, currency_id=currency_id, account_type="fact", search=True
         )
     except Exception as exc:
         raise RuntimeError(f"attach account to actor: {exc}") from exc
+    if before_ids is not None:
+        for account_id in (acc.debit, acc.credit):
+            if account_id in before_ids:
+                res.accounts_reused.add(account_id)
+            else:
+                res.accounts_created.add(account_id)
     return _Sides(debit=acc.debit, credit=acc.credit, name_id=name_id, currency_id=currency_id)
 
 
@@ -593,6 +615,9 @@ class BatchResult:
             total.duplicate += r.duplicate
             total.skipped += r.skipped
             total.actors |= r.actors
+            total.accounts_created |= r.accounts_created
+            total.accounts_reused |= r.accounts_reused
+            total.account_measurement_complete &= r.account_measurement_complete
             total.warnings.extend(f"{outcome.job.label()}: {w}" for w in r.warnings)
             for c in r.currencies:
                 agg = by_currency.get(c.currency)

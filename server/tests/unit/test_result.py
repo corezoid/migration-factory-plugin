@@ -66,6 +66,38 @@ def test_add_statement_replaces_by_ref_not_append():
     assert res.transactions_posted == 9
 
 
+def test_account_counts_are_optional_and_deduplicated_across_statements():
+    res = result_mod.RunResult()
+    assert "accountsCreated" not in res.to_json()
+    res.add_statement(result_mod.StatementRecord(
+        ref="a", created_account_refs=["account-1", "account-2"], reused_account_refs=[]
+    ))
+    res.add_statement(result_mod.StatementRecord(
+        ref="b", created_account_refs=[], reused_account_refs=["account-1", "account-3"]
+    ))
+    assert res.to_json()["accountsCreated"] == 2
+    assert res.to_json()["accountsReused"] == 1
+    res.add_statement(result_mod.StatementRecord(
+        ref="a", created_account_refs=[], reused_account_refs=["account-1"]
+    ))
+    assert res.to_json()["accountsCreated"] == 2
+    assert res.to_json()["accountsReused"] == 1
+
+
+def test_legacy_statement_keeps_account_counts_unknown():
+    res = result_mod.RunResult()
+    res.add_statement(result_mod.StatementRecord(ref="old", transactions=3))
+    res.add_statement(result_mod.StatementRecord(
+        ref="new", created_account_refs=["account-1"], reused_account_refs=[]
+    ))
+    assert "accountsCreated" not in res.to_json()
+    assert "accountsReused" not in res.to_json()
+    res.add_statement(result_mod.StatementRecord(
+        ref="old", created_account_refs=[], reused_account_refs=["account-1"]
+    ))
+    assert "accountsCreated" not in res.to_json()
+
+
 def test_load_missing_file_is_empty_not_error(tmp_path):
     res = result_mod.load_result(str(tmp_path / "nope.json"))
     assert res == result_mod.RunResult()
